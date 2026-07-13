@@ -35,7 +35,8 @@
     "dev:setup": "turbo run dev:setup -F @nichehuntr-v2/backend",
     "deploy": "turbo run deploy -F @nichehuntr-v2/infra",
     "destroy": "turbo run destroy -F @nichehuntr-v2/infra",
-    "check": "biome check --write ."
+    "check": "biome check --write .",
+    "test": "turbo run test"
   },
   "dependencies": {
     "@nichehuntr-v2/env": "workspace:*",

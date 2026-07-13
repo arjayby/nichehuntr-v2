@@ -5,8 +5,11 @@
   "license": "ISC",
   "author": "",
   "scripts": {
+    "check-types": "tsc --noEmit -p convex",
     "dev": "convex dev",
-    "dev:setup": "convex dev --configure --until-success"
+    "dev:setup": "convex dev --configure --until-success",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@convex-dev/better-auth": "catalog:",
@@ -18,8 +21,12 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
     "@nichehuntr-v2/config": "workspace:*",
     "@types/node": "^24.3.0",
-    "typescript": "catalog:"
+    "convex-test": "^0.0.54",
+    "typescript": "catalog:",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   }
 }

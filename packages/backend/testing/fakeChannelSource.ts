@@ -23,6 +23,8 @@ export function createFakeChannelSource(
 ): ChannelSource & {
   /** Replaces a seeded Channel, so a test can simulate what a later crawl sees. */
   set(channel: FakeChannel): void;
+  /** Drops a Channel, so a test can simulate one deleted on YouTube between crawls. */
+  remove(youtubeChannelId: string): void;
 } {
   const channels = new Map<string, FakeChannel>(
     seed.map((channel) => [channel.youtubeChannelId, channel]),
@@ -34,6 +36,10 @@ export function createFakeChannelSource(
   return {
     set(channel) {
       channels.set(channel.youtubeChannelId, channel);
+    },
+
+    remove(youtubeChannelId) {
+      channels.delete(youtubeChannelId);
     },
 
     async getChannel(youtubeChannelId) {

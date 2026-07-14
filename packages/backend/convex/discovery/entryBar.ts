@@ -13,16 +13,18 @@
  * We are a hunting tool, not an archive.
  */
 
-// The bar itself. Tune the index's appetite with these two numbers and nowhere else:
-// every admission and every age-out in the codebase reads them.
+import { DAY, RECENT_WINDOW_DAYS } from "./recentWindow";
 
-/** Views a Channel must have earned inside the window to be worth indexing. */
+/**
+ * The bar itself: the index's appetite, in one number. Every admission and every age-out
+ * in the codebase reads it, and nothing else sets it.
+ *
+ * The window it is measured over is not ours to choose — it is the Discovery-wide
+ * `RECENT_WINDOW_DAYS`, the same "recent" a Channel's Signals are computed against, so
+ * that a Channel cannot be admitted on one definition of recent and then scored on
+ * another.
+ */
 export const MINIMUM_RECENT_VIEWS = 10_000;
-
-/** How far back "recent" reaches. */
-export const RECENT_WINDOW_DAYS = 30;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** All the Entry Bar ever looks at. Note the absence of a subscriber count. */
 export type EntryBarVideo = {
@@ -41,7 +43,7 @@ export type EntryBarVideo = {
  * day 0, from a single crawl, or nothing can be admitted at all.
  */
 function recentViews(videos: readonly EntryBarVideo[], now: number): number {
-  const windowOpenedAt = now - RECENT_WINDOW_DAYS * DAY_MS;
+  const windowOpenedAt = now - RECENT_WINDOW_DAYS * DAY;
   return videos
     .filter((video) => video.publishedAt >= windowOpenedAt)
     .reduce((views, video) => views + video.viewCount, 0);

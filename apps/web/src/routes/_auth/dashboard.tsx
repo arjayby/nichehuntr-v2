@@ -7,43 +7,48 @@ import { useQuery } from "convex/react";
 import UserMenu from "@/components/user-menu";
 
 export const Route = createFileRoute("/_auth/dashboard")({
-  component: DashboardContent,
+	component: DashboardContent,
 });
 
 function DashboardContent() {
-  const privateData = useQuery(api.privateData.get);
-  const products = useQuery(api.polar.listAllProducts);
-  const subscription = useQuery(api.polar.getCurrentSubscription);
+	const privateData = useQuery(api.privateData.get);
+	const products = useQuery(api.polar.listAllProducts);
+	const subscription = useQuery(api.polar.getCurrentSubscription);
 
-  const product = products?.find((product: { isRecurring?: boolean }) => product.isRecurring);
-  const hasActiveSubscription = Boolean(subscription);
+	const product = products?.find(
+		(product: { isRecurring?: boolean }) => product.isRecurring,
+	);
+	const hasActiveSubscription = Boolean(subscription);
 
-  return (
-    <div>
-      <h1>Dashboard</h1>
-      <p>privateData: {privateData?.message}</p>
-      <p>Plan: {hasActiveSubscription ? "Active" : "Free"}</p>
-      {subscription === undefined ? (
-        <p>Loading subscription options...</p>
-      ) : hasActiveSubscription ? (
-        <CustomerPortalLink polarApi={api.polar} className={buttonVariants({ variant: "outline" })}>
-          Manage Subscription
-        </CustomerPortalLink>
-      ) : products === undefined ? (
-        <p>Loading subscription options...</p>
-      ) : product ? (
-        <CheckoutLink
-          polarApi={api.polar}
-          productIds={[product.id]}
-          embed={false}
-          className={buttonVariants({ variant: "default" })}
-        >
-          Upgrade
-        </CheckoutLink>
-      ) : (
-        <p>No recurring plans available.</p>
-      )}
-      <UserMenu />
-    </div>
-  );
+	return (
+		<div>
+			<h1>Dashboard</h1>
+			<p>privateData: {privateData?.message}</p>
+			<p>Plan: {hasActiveSubscription ? "Active" : "Free"}</p>
+			{subscription === undefined ? (
+				<p>Loading subscription options...</p>
+			) : hasActiveSubscription ? (
+				<CustomerPortalLink
+					polarApi={api.polar}
+					className={buttonVariants({ variant: "outline" })}
+				>
+					Manage Subscription
+				</CustomerPortalLink>
+			) : products === undefined ? (
+				<p>Loading subscription options...</p>
+			) : product ? (
+				<CheckoutLink
+					polarApi={api.polar}
+					productIds={[product.id]}
+					embed={false}
+					className={buttonVariants({ variant: "default" })}
+				>
+					Upgrade
+				</CheckoutLink>
+			) : (
+				<p>No recurring plans available.</p>
+			)}
+			<UserMenu />
+		</div>
+	);
 }

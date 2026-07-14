@@ -6,18 +6,18 @@
 import { type Infer, v } from "convex/values";
 
 export const channelStatsValidator = v.object({
-  subscriberCount: v.number(),
-  totalViewCount: v.number(),
-  videoCount: v.number(),
+	subscriberCount: v.number(),
+	totalViewCount: v.number(),
+	videoCount: v.number(),
 });
 
 export type ChannelStats = Infer<typeof channelStatsValidator>;
 
 /** Takes the moving stats off a Channel, whatever else it is carrying. */
 export function statsOf(channel: ChannelStats): ChannelStats {
-  return {
-    subscriberCount: channel.subscriberCount,
-    totalViewCount: channel.totalViewCount,
-    videoCount: channel.videoCount,
-  };
+	return {
+		subscriberCount: channel.subscriberCount,
+		totalViewCount: channel.totalViewCount,
+		videoCount: channel.videoCount,
+	};
 }

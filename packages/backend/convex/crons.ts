@@ -11,10 +11,10 @@ const crons = cronJobs();
  * fast the index drains its backlog of due Channels, not how fresh any one Channel is.
  */
 crons.interval(
-  "refresh due channels",
-  { hours: 1 },
-  internal.refresh.refreshDueChannels,
-  {},
+	"refresh due channels",
+	{ hours: 1 },
+	internal.refresh.refreshDueChannels,
+	{},
 );
 
 export default crons;

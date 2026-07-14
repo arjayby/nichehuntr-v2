@@ -1,5 +1,6 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { aChannel, DAY, longVideo } from "../testing/channelFixtures";
 import {
   createFakeChannelSource,
   type FakeChannel,
@@ -7,34 +8,10 @@ import {
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import crons from "./crons";
-import { type SourceVideo, setChannelSource } from "./discovery/channelSource";
+import { setChannelSource } from "./discovery/channelSource";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
-
-const DAY = 24 * 60 * 60 * 1000;
-const now = Date.UTC(2026, 6, 13);
-
-const aVideo: SourceVideo = {
-  youtubeVideoId: "vid_long",
-  title: "Repotting a 40-year-old juniper",
-  publishedAt: now - 3 * DAY,
-  viewCount: 90_000,
-  durationSeconds: 14 * 60,
-};
-
-const aChannel = (overrides: Partial<FakeChannel> = {}): FakeChannel => ({
-  youtubeChannelId: "UC_bonsai",
-  title: "Bonsai Hours",
-  description: "Slow television for small trees.",
-  handle: "@bonsaihours",
-  subscriberCount: 12_000,
-  totalViewCount: 4_000_000,
-  videoCount: 120,
-  publishedAt: now - 400 * DAY,
-  videos: [aVideo],
-  ...overrides,
-});
 
 const setup = (seed: FakeChannel[]) => {
   const source = createFakeChannelSource(seed);
@@ -45,6 +22,30 @@ const setup = (seed: FakeChannel[]) => {
     source,
     /** Runs the crawls a Refresh scheduled, and waits for them to land. */
     settle: () => t.finishAllScheduledFunctions(vi.runAllTimers),
+
+    /** Puts a Channel in the index, as an earlier crawl would have. */
+    async index(youtubeChannelId: string) {
+      await t.action(internal.ingestion.ingestChannel, { youtubeChannelId });
+    },
+
+    /** Ages a Channel, so that it is due a Refresh again. */
+    async age(youtubeChannelId: string, by: number) {
+      await t.run(async (ctx) => {
+        const channel = await ctx.db
+          .query("channels")
+          .withIndex("by_youtube_channel_id", (q) =>
+            q.eq("youtubeChannelId", youtubeChannelId),
+          )
+          .unique();
+        await ctx.db.patch(channel?._id as Id<"channels">, {
+          lastRefreshedAt: Date.now() - by,
+          lastRefreshAttemptedAt: Date.now() - by,
+        });
+      });
+    },
+
+    channels: () => t.run((ctx) => ctx.db.query("channels").collect()),
+    snapshots: () => t.run((ctx) => ctx.db.query("channelSnapshots").collect()),
   };
 };
 
@@ -59,69 +60,58 @@ afterEach(() => {
   setChannelSource(null);
 });
 
-describe("Refresh", () => {
-  it("appends a Channel Snapshot of the Channel's stats each time it is read", async () => {
-    const { t } = setup([aChannel()]);
+describe("a Refresh", () => {
+  it("appends a Channel Snapshot of the Channel's stats", async () => {
+    const { index, channels, snapshots } = setup([aChannel()]);
 
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
+    await index("UC_bonsai");
 
-    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
-    const snapshots = await t.run((ctx) =>
-      ctx.db.query("channelSnapshots").collect(),
-    );
-    expect(snapshots).toHaveLength(1);
-    expect(snapshots[0]).toMatchObject({
+    const [channel] = await channels();
+    const taken = await snapshots();
+    expect(taken).toHaveLength(1);
+    expect(taken[0]).toMatchObject({
       channelId: channel?._id,
       subscriberCount: 12_000,
       totalViewCount: 4_000_000,
       videoCount: 120,
     });
-    expect(snapshots[0]?.takenAt).toBe(channel?.lastRefreshedAt);
+    expect(taken[0]?.takenAt).toBe(channel?.lastRefreshedAt);
   });
 
   it("appends rather than overwrites, so history accrues Refresh by Refresh", async () => {
     const seeded = aChannel();
-    const { t, source } = setup([seeded]);
+    const { source, index, snapshots } = setup([seeded]);
 
     for (const subscriberCount of [12_000, 15_000, 19_000]) {
       source.set({ ...seeded, subscriberCount });
-      await t.action(internal.ingestion.ingestChannel, {
-        youtubeChannelId: "UC_bonsai",
-      });
+      await index("UC_bonsai");
     }
 
-    const snapshots = await t.run((ctx) =>
-      ctx.db.query("channelSnapshots").collect(),
-    );
-    // Three Refreshes, three measurements. A Snapshot overwritten is a Snapshot
-    // lost, and history cannot be backfilled.
-    expect(snapshots.map((snapshot) => snapshot.subscriberCount)).toEqual([
+    // Three crawls, three measurements — a Snapshot overwritten is a measurement
+    // destroyed, and it cannot be taken again.
+    expect((await snapshots()).map((taken) => taken.subscriberCount)).toEqual([
       12_000, 15_000, 19_000,
     ]);
   });
 
   it("updates the Channel's current stats and recomputes its Signals", async () => {
     const seeded = aChannel();
-    const { t, source } = setup([seeded]);
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
+    const { t, source, index, age, channels, settle } = setup([seeded]);
+    await index("UC_bonsai");
+    await age("UC_bonsai", 30 * DAY);
 
     source.set({
       ...seeded,
       subscriberCount: 24_000,
       totalViewCount: 8_000_000,
-      videos: [{ ...aVideo, viewCount: 400_000 }],
+      videos: [{ ...longVideo, viewCount: 400_000 }],
     });
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
 
-    const channels = await t.run((ctx) => ctx.db.query("channels").collect());
-    expect(channels).toHaveLength(1);
-    expect(channels[0]).toMatchObject({
+    const indexed = await channels();
+    expect(indexed).toHaveLength(1);
+    expect(indexed[0]).toMatchObject({
       subscriberCount: 24_000,
       totalViewCount: 8_000_000,
       medianViewsPerVideo: 400_000,
@@ -130,117 +120,134 @@ describe("Refresh", () => {
   });
 
   it("records the Channel's Freshness, so its stats can be trusted or doubted", async () => {
-    const { t } = setup([aChannel()]);
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
-    const [first] = await t.run((ctx) => ctx.db.query("channels").collect());
+    const { t, index, age, channels, settle } = setup([aChannel()]);
+    await index("UC_bonsai");
+    await age("UC_bonsai", 30 * DAY);
 
-    await t.run((ctx) =>
-      ctx.db.patch(first?._id as Id<"channels">, {
-        lastRefreshedAt: Date.now() - 2 * DAY,
-      }),
-    );
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
 
-    const [refreshed] = await t.run((ctx) =>
-      ctx.db.query("channels").collect(),
-    );
-    expect(refreshed?.lastRefreshedAt).toBeGreaterThan(Date.now() - DAY);
+    const [refreshed] = await channels();
+    expect(refreshed?.lastRefreshedAt).toBe(Date.now());
+  });
+
+  it("is scheduled, so history accrues without anyone asking for it", () => {
+    // A Refresh that only ran on demand would record history only for the Channels
+    // somebody happened to ask about — and the days it did not run are lost.
+    expect(crons.crons["refresh due channels"]).toMatchObject({
+      schedule: { type: "interval", hours: 1 },
+    });
   });
 });
 
 describe("refreshDueChannels", () => {
   it("Refreshes the Channels we have not looked at in too long", async () => {
     const seeded = aChannel();
-    const { t, source, settle } = setup([seeded]);
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
-    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
-    await t.run((ctx) =>
-      ctx.db.patch(channel?._id as Id<"channels">, {
-        lastRefreshedAt: Date.now() - 30 * DAY,
-      }),
-    );
+    const { t, source, index, age, channels, snapshots, settle } = setup([
+      seeded,
+    ]);
+    await index("UC_bonsai");
+    await age("UC_bonsai", 30 * DAY);
 
     // The Channel kept growing while we were not looking.
     source.set({ ...seeded, subscriberCount: 40_000 });
     await t.action(internal.refresh.refreshDueChannels, {});
     await settle();
 
-    const [refreshed] = await t.run((ctx) =>
-      ctx.db.query("channels").collect(),
-    );
+    const [refreshed] = await channels();
     expect(refreshed?.subscriberCount).toBe(40_000);
-
-    const snapshots = await t.run((ctx) =>
-      ctx.db.query("channelSnapshots").collect(),
-    );
-    expect(snapshots.map((snapshot) => snapshot.subscriberCount)).toEqual([
+    expect((await snapshots()).map((taken) => taken.subscriberCount)).toEqual([
       12_000, 40_000,
     ]);
   });
 
   it("leaves a Channel we have just read alone, so no Crawl Budget is wasted", async () => {
     const seeded = aChannel();
-    const { t, source, settle } = setup([seeded]);
-    await t.action(internal.ingestion.ingestChannel, {
-      youtubeChannelId: "UC_bonsai",
-    });
+    const { t, source, index, channels, snapshots, settle } = setup([seeded]);
+    await index("UC_bonsai");
 
     source.set({ ...seeded, subscriberCount: 40_000 });
     await t.action(internal.refresh.refreshDueChannels, {});
     await settle();
 
-    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+    const [channel] = await channels();
     expect(channel?.subscriberCount).toBe(12_000);
-    const snapshots = await t.run((ctx) =>
-      ctx.db.query("channelSnapshots").collect(),
-    );
-    expect(snapshots).toHaveLength(1);
+    expect(await snapshots()).toHaveLength(1);
   });
 
-  it("spends its batch on the Channels we have looked at least recently", async () => {
-    const channels = [
-      aChannel({ youtubeChannelId: "UC_stalest" }),
-      aChannel({ youtubeChannelId: "UC_stale" }),
-      aChannel({ youtubeChannelId: "UC_recent" }),
-    ];
-    const { t, settle } = setup(channels);
-    for (const channel of channels) {
-      await t.action(internal.ingestion.ingestChannel, {
-        youtubeChannelId: channel.youtubeChannelId,
-      });
+  it("spends its budget on the Channels we have looked at least recently", async () => {
+    const seeded = ["UC_stalest", "UC_stale", "UC_recent"].map(
+      (youtubeChannelId) => aChannel({ youtubeChannelId }),
+    );
+    const { t, index, age, channels, settle } = setup(seeded);
+    for (const channel of seeded) {
+      await index(channel.youtubeChannelId);
     }
-    const staleness: Record<string, number> = {
-      UC_stalest: 90 * DAY,
-      UC_stale: 30 * DAY,
-      UC_recent: 10 * DAY,
-    };
-    await t.run(async (ctx) => {
-      for (const channel of await ctx.db.query("channels").collect()) {
-        await ctx.db.patch(channel._id, {
-          lastRefreshedAt:
-            Date.now() - (staleness[channel.youtubeChannelId] as number),
-        });
-      }
-    });
+    await age("UC_stalest", 90 * DAY);
+    await age("UC_stale", 30 * DAY);
+    await age("UC_recent", 10 * DAY);
 
     // A budget of two: the two Channels we have looked at least recently.
     await t.action(internal.refresh.refreshDueChannels, { limit: 2 });
     await settle();
 
-    const rows = await t.run((ctx) => ctx.db.query("channels").collect());
-    const refreshedAt = new Map(
-      rows.map((row) => [row.youtubeChannelId, row.lastRefreshedAt]),
+    const freshness = new Map(
+      (await channels()).map((channel) => [
+        channel.youtubeChannelId,
+        channel.lastRefreshedAt,
+      ]),
     );
-    const cutoff = Date.now() - DAY;
-    expect(refreshedAt.get("UC_stalest")).toBeGreaterThan(cutoff);
-    expect(refreshedAt.get("UC_stale")).toBeGreaterThan(cutoff);
-    expect(refreshedAt.get("UC_recent")).toBeLessThan(cutoff);
+    expect(freshness.get("UC_stalest")).toBe(Date.now());
+    expect(freshness.get("UC_stale")).toBe(Date.now());
+    expect(freshness.get("UC_recent")).toBeLessThan(Date.now() - DAY);
+  });
+
+  it("does not crawl a Channel whose Refresh is already in flight", async () => {
+    const seeded = aChannel();
+    const { t, index, age, snapshots, settle } = setup([seeded]);
+    await index("UC_bonsai");
+    await age("UC_bonsai", 30 * DAY);
+
+    // The scheduler ticks again while the first run's crawls are still draining. A
+    // Channel already claimed must not be paid for twice.
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
+
+    expect(await snapshots()).toHaveLength(2);
+  });
+
+  it("does not let a Channel that has gone from YouTube hold the budget open", async () => {
+    const seeded = [
+      aChannel({ youtubeChannelId: "UC_gone" }),
+      aChannel({ youtubeChannelId: "UC_alive" }),
+    ];
+    const { t, source, index, age, channels, settle } = setup(seeded);
+    for (const channel of seeded) {
+      await index(channel.youtubeChannelId);
+    }
+    // The dead Channel is the stalest, so it is first in line for every crawl.
+    await age("UC_gone", 90 * DAY);
+    await age("UC_alive", 30 * DAY);
+    source.remove("UC_gone");
+
+    // A budget of one per run: if the dead Channel kept its place at the head of the
+    // queue, it would starve every live Channel behind it, every run, forever.
+    await t.action(internal.refresh.refreshDueChannels, { limit: 1 });
+    await settle();
+    await t.action(internal.refresh.refreshDueChannels, { limit: 1 });
+    await settle();
+
+    const freshness = new Map(
+      (await channels()).map((channel) => [
+        channel.youtubeChannelId,
+        channel.lastRefreshedAt,
+      ]),
+    );
+    expect(freshness.get("UC_alive")).toBe(Date.now());
+    // And we tell the truth about the one we could not read: its Freshness is old,
+    // because we did not manage to look at it.
+    expect(freshness.get("UC_gone")).toBeLessThan(Date.now() - 30 * DAY);
   });
 
   it("Refreshes the rest of the batch when one Channel's crawl fails", async () => {
@@ -248,46 +255,42 @@ describe("refreshDueChannels", () => {
       aChannel({ youtubeChannelId: "UC_gone" }),
       aChannel({ youtubeChannelId: "UC_alive" }),
     ];
-    const { t, source, settle } = setup(seeded);
+    const { t, source, index, age, channels, settle } = setup(seeded);
     for (const channel of seeded) {
-      await t.action(internal.ingestion.ingestChannel, {
-        youtubeChannelId: channel.youtubeChannelId,
-      });
+      await index(channel.youtubeChannelId);
+      await age(channel.youtubeChannelId, 30 * DAY);
     }
-    await t.run(async (ctx) => {
-      for (const channel of await ctx.db.query("channels").collect()) {
-        await ctx.db.patch(channel._id, {
-          lastRefreshedAt: Date.now() - 30 * DAY,
-        });
-      }
-    });
 
-    // The Channel was deleted on YouTube between crawls: the source no longer has it.
+    // The Channel was deleted on YouTube between crawls.
     source.remove("UC_gone");
-    source.set({
-      ...(seeded[1] as FakeChannel),
-      subscriberCount: 40_000,
-    });
+    source.set({ ...(seeded[1] as FakeChannel), subscriberCount: 40_000 });
     await t.action(internal.refresh.refreshDueChannels, {});
     await settle();
 
-    const alive = await t.run((ctx) =>
-      ctx.db
-        .query("channels")
-        .withIndex("by_youtube_channel_id", (q) =>
-          q.eq("youtubeChannelId", "UC_alive"),
-        )
-        .unique(),
+    const alive = (await channels()).find(
+      (channel) => channel.youtubeChannelId === "UC_alive",
     );
     expect(alive?.subscriberCount).toBe(40_000);
   });
 
-  it("is scheduled, so history accrues without anyone asking for it", () => {
-    // A Refresh that only ran on demand would record history only for the Channels
-    // somebody happened to look at — and the days it did not run are not recoverable.
-    const scheduled = Object.values(crons.crons);
-    expect(scheduled).toContainEqual(
-      expect.objectContaining({ name: "refresh:refreshDueChannels" }),
-    );
+  it("Refreshes a Channel indexed before we tracked Refresh attempts at all", async () => {
+    const seeded = aChannel();
+    const { t, source, index, channels, settle } = setup([seeded]);
+    await index("UC_bonsai");
+    // A Channel from before this field existed has never recorded an attempt, and is
+    // the most overdue thing in the index — not the least.
+    await t.run(async (ctx) => {
+      const [channel] = await ctx.db.query("channels").collect();
+      await ctx.db.patch(channel?._id as Id<"channels">, {
+        lastRefreshAttemptedAt: undefined,
+      });
+    });
+
+    source.set({ ...seeded, subscriberCount: 40_000 });
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
+
+    const [refreshed] = await channels();
+    expect(refreshed?.subscriberCount).toBe(40_000);
   });
 });

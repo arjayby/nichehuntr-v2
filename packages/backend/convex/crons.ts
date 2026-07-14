@@ -4,12 +4,11 @@ import { internal } from "./_generated/api";
 const crons = cronJobs();
 
 /**
- * Refresh runs on the clock, not on demand. History cannot be backfilled: a Channel
- * nobody asked about today still has a subscriber count today, and if we do not write
- * it down now it is gone.
+ * Refresh runs on the clock, not on demand: a Channel nobody asked about today still
+ * has a subscriber count today.
  *
- * Hourly, not daily: a run crawls a bounded batch, so the interval is how fast the
- * index drains its backlog of stale Channels, not how fresh any one Channel gets.
+ * Hourly, not daily: a run spends a bounded Crawl Budget, so this interval sets how
+ * fast the index drains its backlog of due Channels, not how fresh any one Channel is.
  */
 crons.interval(
   "refresh due channels",

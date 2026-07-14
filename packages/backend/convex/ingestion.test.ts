@@ -1,53 +1,22 @@
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import { setChannelSource, type SourceVideo } from "./discovery/channelSource";
+import {
+  aChannel,
+  DAY,
+  longVideo,
+  NOW as now,
+  shortVideo,
+} from "../testing/channelFixtures";
 import {
   createFakeChannelSource,
   type FakeChannel,
 } from "../testing/fakeChannelSource";
+import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
+import { setChannelSource } from "./discovery/channelSource";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
-
-const DAY = 24 * 60 * 60 * 1000;
-const now = Date.UTC(2026, 6, 13);
-
-const longVideo: SourceVideo = {
-  youtubeVideoId: "vid_long",
-  title: "Repotting a 40-year-old juniper",
-  publishedAt: now - 3 * DAY,
-  viewCount: 90_000,
-  durationSeconds: 14 * 60,
-};
-
-const shortVideo: SourceVideo = {
-  youtubeVideoId: "vid_short",
-  title: "One cut, huge difference",
-  publishedAt: now - 1 * DAY,
-  viewCount: 800_000,
-  durationSeconds: 45,
-};
-
-/**
- * A Channel with a back-catalogue of 120 Videos and 4m lifetime views — a lifetime
- * average Video of ~33k — of which a crawl returns only the two most recent. Those two
- * are doing far better than that average, so this is a Channel heating up.
- */
-const aChannel = (overrides: Partial<FakeChannel> = {}): FakeChannel => ({
-  youtubeChannelId: "UC_bonsai",
-  title: "Bonsai Hours",
-  description: "Slow television for small trees.",
-  handle: "@bonsaihours",
-  thumbnailUrl: "https://yt.example/bonsai.jpg",
-  subscriberCount: 12_000,
-  totalViewCount: 4_000_000,
-  videoCount: 120,
-  publishedAt: now - 400 * DAY,
-  videos: [longVideo, shortVideo],
-  ...overrides,
-});
 
 const setup = (seed: FakeChannel[]) => {
   const source = createFakeChannelSource(seed);

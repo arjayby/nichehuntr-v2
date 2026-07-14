@@ -14,5 +14,5 @@ const SHORT_MAX_DURATION_SECONDS = 180;
  * here wrongly; correcting that means carrying aspect ratio on SourceVideo.
  */
 export function deriveForm(durationSeconds: number): Form {
-  return durationSeconds <= SHORT_MAX_DURATION_SECONDS ? "short" : "longform";
+	return durationSeconds <= SHORT_MAX_DURATION_SECONDS ? "short" : "longform";
 }

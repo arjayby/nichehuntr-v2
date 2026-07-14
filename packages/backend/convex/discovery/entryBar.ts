@@ -28,8 +28,8 @@ export const MINIMUM_RECENT_VIEWS = 10_000;
 
 /** All the Entry Bar ever looks at. Note the absence of a subscriber count. */
 export type EntryBarVideo = {
-  publishedAt: number;
-  viewCount: number;
+	publishedAt: number;
+	viewCount: number;
 };
 
 /**
@@ -43,10 +43,10 @@ export type EntryBarVideo = {
  * day 0, from a single crawl, or nothing can be admitted at all.
  */
 function recentViews(videos: readonly EntryBarVideo[], now: number): number {
-  const windowOpenedAt = now - RECENT_WINDOW_DAYS * DAY;
-  return videos
-    .filter((video) => video.publishedAt >= windowOpenedAt)
-    .reduce((views, video) => views + video.viewCount, 0);
+	const windowOpenedAt = now - RECENT_WINDOW_DAYS * DAY;
+	return videos
+		.filter((video) => video.publishedAt >= windowOpenedAt)
+		.reduce((views, video) => views + video.viewCount, 0);
 }
 
 /**
@@ -54,8 +54,8 @@ function recentViews(videos: readonly EntryBarVideo[], now: number): number {
  * it, whether it may stay.
  */
 export function passesEntryBar(
-  videos: readonly EntryBarVideo[],
-  now: number,
+	videos: readonly EntryBarVideo[],
+	now: number,
 ): boolean {
-  return recentViews(videos, now) >= MINIMUM_RECENT_VIEWS;
+	return recentViews(videos, now) >= MINIMUM_RECENT_VIEWS;
 }

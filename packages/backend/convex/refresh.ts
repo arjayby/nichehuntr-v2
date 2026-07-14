@@ -45,21 +45,21 @@ const CRAWL_BUDGET_PER_RUN = 50;
  * claim to have refreshed it.
  */
 export const claimDueChannels = internalMutation({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const now = Date.now();
-    const due = await ctx.db
-      .query("channels")
-      .withIndex("by_last_refresh_attempted_at", (q) =>
-        q.lte("lastRefreshAttemptedAt", now - REFRESH_AFTER_MS),
-      )
-      .take(args.limit ?? CRAWL_BUDGET_PER_RUN);
+	args: { limit: v.optional(v.number()) },
+	handler: async (ctx, args) => {
+		const now = Date.now();
+		const due = await ctx.db
+			.query("channels")
+			.withIndex("by_last_refresh_attempted_at", (q) =>
+				q.lte("lastRefreshAttemptedAt", now - REFRESH_AFTER_MS),
+			)
+			.take(args.limit ?? CRAWL_BUDGET_PER_RUN);
 
-    for (const channel of due) {
-      await ctx.db.patch(channel._id, { lastRefreshAttemptedAt: now });
-    }
-    return due.map((channel) => channel.youtubeChannelId);
-  },
+		for (const channel of due) {
+			await ctx.db.patch(channel._id, { lastRefreshAttemptedAt: now });
+		}
+		return due.map((channel) => channel.youtubeChannelId);
+	},
 });
 
 /**
@@ -71,18 +71,18 @@ export const claimDueChannels = internalMutation({
  * Channel's Refresh and not the rest of the batch's.
  */
 export const refreshDueChannels = internalAction({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    const claimed = await ctx.runMutation(internal.refresh.claimDueChannels, {
-      limit: args.limit,
-    });
+	args: { limit: v.optional(v.number()) },
+	handler: async (ctx, args) => {
+		const claimed = await ctx.runMutation(internal.refresh.claimDueChannels, {
+			limit: args.limit,
+		});
 
-    for (const youtubeChannelId of claimed) {
-      await ctx.scheduler.runAfter(0, internal.ingestion.ingestChannel, {
-        youtubeChannelId,
-      });
-    }
+		for (const youtubeChannelId of claimed) {
+			await ctx.scheduler.runAfter(0, internal.ingestion.ingestChannel, {
+				youtubeChannelId,
+			});
+		}
 
-    return { channelsScheduled: claimed.length };
-  },
+		return { channelsScheduled: claimed.length };
+	},
 });

@@ -3,9 +3,9 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { internalAction, internalMutation } from "./_generated/server";
 import {
-  getChannelSource,
-  sourceChannelValidator,
-  sourceVideoValidator,
+	getChannelSource,
+	sourceChannelValidator,
+	sourceVideoValidator,
 } from "./discovery/channelSource";
 import { statsOf } from "./discovery/channelStats";
 import { passesEntryBar } from "./discovery/entryBar";
@@ -23,26 +23,26 @@ const RECENT_VIDEO_LIMIT = 50;
  * never from a client.
  */
 export const ingestChannel = internalAction({
-  args: {
-    youtubeChannelId: v.string(),
-    videoLimit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const source = getChannelSource();
+	args: {
+		youtubeChannelId: v.string(),
+		videoLimit: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		const source = getChannelSource();
 
-    const channel = await source.getChannel(args.youtubeChannelId);
-    if (channel === null) {
-      throw new Error(`ChannelSource has no Channel ${args.youtubeChannelId}`);
-    }
-    const videos = await source.listVideos(args.youtubeChannelId, {
-      limit: args.videoLimit ?? RECENT_VIDEO_LIMIT,
-    });
+		const channel = await source.getChannel(args.youtubeChannelId);
+		if (channel === null) {
+			throw new Error(`ChannelSource has no Channel ${args.youtubeChannelId}`);
+		}
+		const videos = await source.listVideos(args.youtubeChannelId, {
+			limit: args.videoLimit ?? RECENT_VIDEO_LIMIT,
+		});
 
-    return await ctx.runMutation(internal.ingestion.storeChannel, {
-      channel,
-      videos,
-    });
-  },
+		return await ctx.runMutation(internal.ingestion.storeChannel, {
+			channel,
+			videos,
+		});
+	},
 });
 
 /**
@@ -64,77 +64,77 @@ export const ingestChannel = internalAction({
  * 4. Appends a Channel Snapshot, which is how history accrues at all.
  */
 export const storeChannel = internalMutation({
-  args: {
-    channel: sourceChannelValidator,
-    videos: v.array(sourceVideoValidator),
-  },
-  handler: async (ctx, { channel, videos }) => {
-    const now = Date.now();
-    const crawled = videos.map((video) => ({
-      ...video,
-      form: deriveForm(video.durationSeconds),
-    }));
+	args: {
+		channel: sourceChannelValidator,
+		videos: v.array(sourceVideoValidator),
+	},
+	handler: async (ctx, { channel, videos }) => {
+		const now = Date.now();
+		const crawled = videos.map((video) => ({
+			...video,
+			form: deriveForm(video.durationSeconds),
+		}));
 
-    const existing = await ctx.db
-      .query("channels")
-      .withIndex("by_youtube_channel_id", (q) =>
-        q.eq("youtubeChannelId", channel.youtubeChannelId),
-      )
-      .unique();
+		const existing = await ctx.db
+			.query("channels")
+			.withIndex("by_youtube_channel_id", (q) =>
+				q.eq("youtubeChannelId", channel.youtubeChannelId),
+			)
+			.unique();
 
-    // A Channel we have never seen that is below the bar is turned away whole: no row,
-    // no Videos, and no Snapshot, because a Channel outside the index has no history to
-    // keep.
-    const meetsEntryBar = passesEntryBar(videos, now);
-    if (existing === null && !meetsEntryBar) {
-      return { admitted: false, channelId: null, videosIngested: 0 } as const;
-    }
+		// A Channel we have never seen that is below the bar is turned away whole: no row,
+		// no Videos, and no Snapshot, because a Channel outside the index has no history to
+		// keep.
+		const meetsEntryBar = passesEntryBar(videos, now);
+		if (existing === null && !meetsEntryBar) {
+			return { admitted: false, channelId: null, videosIngested: 0 } as const;
+		}
 
-    const channelFields = {
-      ...channel,
-      ...computeSignals({ channel, videos: crawled, now }),
-      lastRefreshedAt: now,
-      lastRefreshAttemptedAt: now,
-      meetsEntryBar,
-    };
-    let channelId: Id<"channels">;
-    if (existing === null) {
-      channelId = await ctx.db.insert("channels", channelFields);
-    } else {
-      channelId = existing._id;
-      // A Signal this crawl could not compute is patched away rather than left
-      // behind: an absent Momentum is honest, a stale one is a lie.
-      await ctx.db.patch(channelId, channelFields);
-    }
+		const channelFields = {
+			...channel,
+			...computeSignals({ channel, videos: crawled, now }),
+			lastRefreshedAt: now,
+			lastRefreshAttemptedAt: now,
+			meetsEntryBar,
+		};
+		let channelId: Id<"channels">;
+		if (existing === null) {
+			channelId = await ctx.db.insert("channels", channelFields);
+		} else {
+			channelId = existing._id;
+			// A Signal this crawl could not compute is patched away rather than left
+			// behind: an absent Momentum is honest, a stale one is a lie.
+			await ctx.db.patch(channelId, channelFields);
+		}
 
-    // Every crawl is a measurement, so every crawl appends a Channel Snapshot —
-    // including the first one, which no later Refresh can go back and take.
-    await ctx.db.insert("channelSnapshots", {
-      channelId,
-      ...statsOf(channel),
-      takenAt: now,
-    });
+		// Every crawl is a measurement, so every crawl appends a Channel Snapshot —
+		// including the first one, which no later Refresh can go back and take.
+		await ctx.db.insert("channelSnapshots", {
+			channelId,
+			...statsOf(channel),
+			takenAt: now,
+		});
 
-    for (const video of crawled) {
-      const existingVideo = await ctx.db
-        .query("videos")
-        .withIndex("by_youtube_video_id", (q) =>
-          q.eq("youtubeVideoId", video.youtubeVideoId),
-        )
-        .unique();
+		for (const video of crawled) {
+			const existingVideo = await ctx.db
+				.query("videos")
+				.withIndex("by_youtube_video_id", (q) =>
+					q.eq("youtubeVideoId", video.youtubeVideoId),
+				)
+				.unique();
 
-      const videoFields = { ...video, channelId };
-      if (existingVideo === null) {
-        await ctx.db.insert("videos", videoFields);
-      } else {
-        await ctx.db.patch(existingVideo._id, videoFields);
-      }
-    }
+			const videoFields = { ...video, channelId };
+			if (existingVideo === null) {
+				await ctx.db.insert("videos", videoFields);
+			} else {
+				await ctx.db.patch(existingVideo._id, videoFields);
+			}
+		}
 
-    return {
-      admitted: meetsEntryBar,
-      channelId,
-      videosIngested: crawled.length,
-    } as const;
-  },
+		return {
+			admitted: meetsEntryBar,
+			channelId,
+			videosIngested: crawled.length,
+		} as const;
+	},
 });

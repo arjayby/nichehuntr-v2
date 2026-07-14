@@ -84,6 +84,18 @@ export const storeChannel = internalMutation({
       await ctx.db.patch(channelId, channelFields);
     }
 
+    // Every crawl is a measurement, so every crawl appends a Channel Snapshot —
+    // including the first, which is the first point in the Channel's history and the
+    // one no later Refresh can recover. Growth Metrics are Snapshots subtracted; the
+    // Channel document itself remembers only *now*.
+    await ctx.db.insert("channelSnapshots", {
+      channelId,
+      subscriberCount: channel.subscriberCount,
+      totalViewCount: channel.totalViewCount,
+      videoCount: channel.videoCount,
+      takenAt: now,
+    });
+
     for (const video of crawled) {
       const existingVideo = await ctx.db
         .query("videos")

@@ -30,6 +30,11 @@ const shortVideo: SourceVideo = {
   durationSeconds: 45,
 };
 
+/**
+ * A Channel with a back-catalogue of 120 Videos and 4m lifetime views — a lifetime
+ * average Video of ~33k — of which a crawl returns only the two most recent. Those two
+ * are doing far better than that average, so this is a Channel heating up.
+ */
 const aChannel = (overrides: Partial<FakeChannel> = {}): FakeChannel => ({
   youtubeChannelId: "UC_bonsai",
   title: "Bonsai Hours",
@@ -38,7 +43,7 @@ const aChannel = (overrides: Partial<FakeChannel> = {}): FakeChannel => ({
   thumbnailUrl: "https://yt.example/bonsai.jpg",
   subscriberCount: 12_000,
   totalViewCount: 4_000_000,
-  videoCount: 2,
+  videoCount: 120,
   publishedAt: now - 400 * DAY,
   videos: [longVideo, shortVideo],
   ...overrides,
@@ -70,7 +75,7 @@ describe("ingestChannel", () => {
       handle: "@bonsaihours",
       subscriberCount: 12_000,
       totalViewCount: 4_000_000,
-      videoCount: 2,
+      videoCount: 120,
     });
 
     const videos = await t.run((ctx) => ctx.db.query("videos").collect());
@@ -198,6 +203,100 @@ describe("ingestChannel", () => {
       "vid_0",
       "vid_1",
     ]);
+  });
+
+  it("computes the Channel's Signals at ingest and stores them on the Channel", async () => {
+    const { t } = setup([aChannel()]);
+
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+    // The crawl returned two recent Videos: a Short at 800k and a Long-form at 90k.
+    expect(channel).toMatchObject({
+      // 4m lifetime views over 12k subscribers.
+      viewsPerSubscriber: 4_000_000 / 12_000,
+      medianViewsPerVideo: 445_000,
+      shortsUploadShare: 0.5,
+      uploadCadencePerWeek: 2 / (30 / 7),
+    });
+    // Its one Short earns 90% of its views off half its uploads: a Channel whose
+    // Shorts genuinely work, which the two shares keep visible.
+    expect(channel?.shortsViewShare).toBeCloseTo(800_000 / 890_000);
+    // Recent Videos averaging 445k against a lifetime average Video of ~33k: this
+    // Channel is heating up, and Momentum says so off a single crawl.
+    expect(channel?.momentum).toBeCloseTo(445_000 / (4_000_000 / 120));
+    expect(channel?.momentum).toBeGreaterThan(13);
+    expect(channel?.outlierRatio).toBeCloseTo(800_000 / 445_000);
+    expect(channel?.channelAgeDays).toBeGreaterThanOrEqual(400);
+  });
+
+  it("recomputes the Channel's Signals on re-ingest, against the fresher crawl", async () => {
+    const seeded = aChannel();
+    const { t, source } = setup([seeded]);
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    source.set({
+      ...seeded,
+      subscriberCount: 24_000,
+      totalViewCount: 8_000_000,
+      videos: [longVideo, { ...shortVideo, viewCount: 1_600_000 }],
+    });
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+    expect(channel?.medianViewsPerVideo).toBe(845_000);
+    expect(channel?.viewsPerSubscriber).toBe(8_000_000 / 24_000);
+  });
+
+  it("leaves a Signal it cannot compute absent, rather than storing a zero", async () => {
+    // Nothing published inside the recent window: this Channel has no Momentum, and a
+    // stored zero would sort it below every Channel that is merely cooling off.
+    const { t } = setup([
+      aChannel({
+        subscriberCount: 0,
+        videos: [{ ...longVideo, publishedAt: now - 120 * DAY }],
+      }),
+    ]);
+
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+    expect(channel).toBeDefined();
+    expect(channel).not.toHaveProperty("momentum");
+    // Zero subscribers is not a divide-by-zero, and not a Views per Subscriber of 0.
+    expect(channel).not.toHaveProperty("viewsPerSubscriber");
+    // Nor does a Channel with nothing recent have a Form Share or an Outlier Ratio:
+    // there is no recent window to measure, and an absent Signal says so honestly.
+    expect(channel).not.toHaveProperty("shortsUploadShare");
+    expect(channel).not.toHaveProperty("shortsViewShare");
+    expect(channel).not.toHaveProperty("outlierRatio");
+    // But it really did publish nothing this month, and that is a fact, not a gap.
+    expect(channel?.uploadCadencePerWeek).toBe(0);
+  });
+
+  it("stores no composite score, and no Form verdict, on the Channel", async () => {
+    const { t } = setup([aChannel()]);
+
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+    const fields = Object.keys(channel as Doc<"channels">);
+    expect(fields).not.toContain("opportunityScore");
+    expect(fields).not.toContain("score");
+    // Form Shares are two separate ratios. A Channel is never labelled.
+    expect(fields).toContain("shortsUploadShare");
+    expect(fields).toContain("shortsViewShare");
+    expect(fields).not.toContain("form");
   });
 
   it("stores nothing when the source has never heard of the Channel", async () => {

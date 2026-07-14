@@ -7,6 +7,7 @@ import {
   sourceChannelValidator,
   sourceVideoValidator,
 } from "./discovery/channelSource";
+import { statsOf } from "./discovery/channelStats";
 import { deriveForm } from "./discovery/form";
 import { computeSignals } from "./discovery/signals";
 
@@ -43,12 +44,15 @@ export const ingestChannel = internalAction({
 });
 
 /**
- * Upserts a crawled Channel and its Videos. Keyed on YouTube's IDs so that
- * re-ingesting a Channel updates our beliefs about it rather than duplicating it.
+ * Stores everything one crawl of a Channel learned. It does three things, and a
+ * Refresh is exactly this run a second time:
  *
- * The Channel's Signals are computed here, from this one crawl, and stored on the
- * Channel — so a search reads a number off the Channel and never computes across its
- * Videos.
+ * 1. Upserts the Channel and its Videos, keyed on YouTube's IDs, so that re-crawling a
+ *    Channel updates our beliefs about it rather than duplicating it, and records the
+ *    Channel's Freshness.
+ * 2. Computes the Channel's Signals from this one crawl and stores them on the Channel
+ *    — so a search reads a number off the Channel and never computes across its Videos.
+ * 3. Appends a Channel Snapshot, which is how history accrues at all.
  */
 export const storeChannel = internalMutation({
   args: {
@@ -73,6 +77,7 @@ export const storeChannel = internalMutation({
       ...channel,
       ...computeSignals({ channel, videos: crawled, now }),
       lastRefreshedAt: now,
+      lastRefreshAttemptedAt: now,
     };
     let channelId: Id<"channels">;
     if (existing === null) {
@@ -83,6 +88,14 @@ export const storeChannel = internalMutation({
       // behind: an absent Momentum is honest, a stale one is a lie.
       await ctx.db.patch(channelId, channelFields);
     }
+
+    // Every crawl is a measurement, so every crawl appends a Channel Snapshot —
+    // including the first one, which no later Refresh can go back and take.
+    await ctx.db.insert("channelSnapshots", {
+      channelId,
+      ...statsOf(channel),
+      takenAt: now,
+    });
 
     for (const video of crawled) {
       const existingVideo = await ctx.db

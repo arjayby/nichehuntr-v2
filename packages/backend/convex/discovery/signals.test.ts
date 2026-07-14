@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Form } from "./form";
+import { RECENT_WINDOW_DAYS } from "./recentWindow";
 import {
   computeSignals,
-  RECENT_WINDOW_DAYS,
   type SignalChannel,
   type SignalVideo,
 } from "./signals";

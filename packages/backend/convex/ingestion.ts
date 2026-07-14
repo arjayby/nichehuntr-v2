@@ -8,6 +8,7 @@ import {
   sourceVideoValidator,
 } from "./discovery/channelSource";
 import { statsOf } from "./discovery/channelStats";
+import { passesEntryBar } from "./discovery/entryBar";
 import { deriveForm } from "./discovery/form";
 import { computeSignals } from "./discovery/signals";
 
@@ -15,7 +16,8 @@ import { computeSignals } from "./discovery/signals";
 const RECENT_VIDEO_LIMIT = 50;
 
 /**
- * Reads a Channel and its recent Videos from the ChannelSource and stores them.
+ * Reads a Channel and its recent Videos from the ChannelSource and stores them, if
+ * the Entry Bar lets it in.
  *
  * Internal: this spends Crawl Budget, so it is reachable only from our own jobs,
  * never from a client.
@@ -44,15 +46,22 @@ export const ingestChannel = internalAction({
 });
 
 /**
- * Stores everything one crawl of a Channel learned. It does three things, and a
- * Refresh is exactly this run a second time:
+ * Stores everything one crawl of a Channel learned, if the Entry Bar lets the Channel
+ * in. It does four things, and a Refresh is exactly this run a second time:
  *
- * 1. Upserts the Channel and its Videos, keyed on YouTube's IDs, so that re-crawling a
+ * 1. Judges the Channel against the Entry Bar. Admission and age-out are the same
+ *    judgement made at the same moment, so the index cannot drift out of step with the
+ *    bar: a Channel we have never seen that is below the bar is never let in at all,
+ *    and a Channel already in the index that has fallen below it is flagged, not
+ *    deleted. A flagged Channel stops being searchable, but its row, its Videos and its
+ *    Snapshots survive the dip, so a Channel that recovers keeps the history we cannot
+ *    backfill. Refresh keeps crawling it, which is what lets it earn its way back in.
+ * 2. Upserts the Channel and its Videos, keyed on YouTube's IDs, so that re-crawling a
  *    Channel updates our beliefs about it rather than duplicating it, and records the
  *    Channel's Freshness.
- * 2. Computes the Channel's Signals from this one crawl and stores them on the Channel
+ * 3. Computes the Channel's Signals from this one crawl and stores them on the Channel
  *    — so a search reads a number off the Channel and never computes across its Videos.
- * 3. Appends a Channel Snapshot, which is how history accrues at all.
+ * 4. Appends a Channel Snapshot, which is how history accrues at all.
  */
 export const storeChannel = internalMutation({
   args: {
@@ -73,11 +82,20 @@ export const storeChannel = internalMutation({
       )
       .unique();
 
+    // A Channel we have never seen that is below the bar is turned away whole: no row,
+    // no Videos, and no Snapshot, because a Channel outside the index has no history to
+    // keep.
+    const meetsEntryBar = passesEntryBar(videos, now);
+    if (existing === null && !meetsEntryBar) {
+      return { admitted: false, channelId: null, videosIngested: 0 } as const;
+    }
+
     const channelFields = {
       ...channel,
       ...computeSignals({ channel, videos: crawled, now }),
       lastRefreshedAt: now,
       lastRefreshAttemptedAt: now,
+      meetsEntryBar,
     };
     let channelId: Id<"channels">;
     if (existing === null) {
@@ -113,6 +131,10 @@ export const storeChannel = internalMutation({
       }
     }
 
-    return { channelId, videosIngested: crawled.length };
+    return {
+      admitted: meetsEntryBar,
+      channelId,
+      videosIngested: crawled.length,
+    } as const;
   },
 });

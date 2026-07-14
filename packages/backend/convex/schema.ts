@@ -28,6 +28,13 @@ export default defineSchema({
     /** When we last read this Channel from a ChannelSource — its Freshness. */
     lastRefreshedAt: v.number(),
     /**
+     * Whether the Channel still clears the Entry Bar — its Entry Bar status. A Channel
+     * that goes quiet is flagged `false` and drops out of the index users search; the
+     * row stays so its Channel Snapshot history survives the dip, because history
+     * cannot be backfilled and a Channel that recovers must not come back amnesiac.
+     */
+    meetsEntryBar: v.boolean(),
+    /**
      * When Refresh last *tried* to read it, which is not the same thing: a crawl that
      * failed spent Crawl Budget without earning any Freshness. Refresh queues on this,
      * so a Channel deleted on YouTube cannot sit at the head of the queue forever

@@ -273,6 +273,61 @@ describe("refreshDueChannels", () => {
     expect(alive?.subscriberCount).toBe(40_000);
   });
 
+  it("ages a Channel out of the index once it goes quiet", async () => {
+    // The Entry Bar garbage-collects, but only a crawl can notice: this is the whole
+    // chain the cron drives — Refresh claims the Channel, crawls it, and the crawl
+    // judges it against the bar it can no longer clear.
+    const seeded = aChannel();
+    const { t, source, index, age, channels, settle } = setup([seeded]);
+    await index("UC_bonsai");
+    expect((await channels())[0]?.meetsEntryBar).toBe(true);
+    await age("UC_bonsai", 30 * DAY);
+
+    // It stopped uploading: its last Videos have aged out of the recent-views window,
+    // and neither its subscribers nor its back-catalogue can hold its place.
+    source.set({
+      ...seeded,
+      subscriberCount: 200_000,
+      videos: [{ ...longVideo, publishedAt: Date.now() - 400 * DAY }],
+    });
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
+
+    const [quiet] = await channels();
+    expect(quiet?.meetsEntryBar).toBe(false);
+  });
+
+  it("keeps Refreshing an aged-out Channel, so it can earn its way back in", async () => {
+    // Refresh queues on Freshness, not on Entry Bar status. A Channel dropped from the
+    // index that stopped being crawled could never be seen to recover — it would be
+    // evicted permanently by a rule that is meant to be reversible.
+    const seeded = aChannel();
+    const { t, source, index, age, channels, settle } = setup([seeded]);
+    await index("UC_bonsai");
+    const [first] = await channels();
+
+    await age("UC_bonsai", 30 * DAY);
+    source.set({
+      ...seeded,
+      videos: [{ ...longVideo, publishedAt: Date.now() - 400 * DAY }],
+    });
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
+    expect((await channels())[0]?.meetsEntryBar).toBe(false);
+
+    // It starts uploading again, and the next scheduled Refresh finds it.
+    await age("UC_bonsai", 30 * DAY);
+    source.set(seeded);
+    await t.action(internal.refresh.refreshDueChannels, {});
+    await settle();
+
+    const readmitted = await channels();
+    expect(readmitted).toHaveLength(1);
+    expect(readmitted[0]?.meetsEntryBar).toBe(true);
+    // Under its original id: the Snapshot history it accrued survived the dip.
+    expect(readmitted[0]?._id).toBe(first?._id);
+  });
+
   it("Refreshes a Channel indexed before we tracked Refresh attempts at all", async () => {
     const seeded = aChannel();
     const { t, source, index, channels, settle } = setup([seeded]);

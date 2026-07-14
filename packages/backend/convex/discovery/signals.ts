@@ -20,15 +20,8 @@
  */
 import { type Infer, v } from "convex/values";
 import type { Form } from "./form";
+import { DAY, RECENT_WINDOW_DAYS } from "./recentWindow";
 
-/**
- * The window that makes a Video "recent". Every Signal that CONTEXT.md defines over
- * "a recent window" — Momentum, Upload Cadence, Outlier Ratio, both Form Shares —
- * uses this one, so they all answer for the same slice of the Channel's life.
- */
-export const RECENT_WINDOW_DAYS = 30;
-
-const DAY = 24 * 60 * 60 * 1000;
 const DAYS_PER_WEEK = 7;
 
 export const signalsValidator = v.object({
@@ -100,7 +93,8 @@ function median(values: number[]): number | undefined {
 
 const sum = (values: number[]) => values.reduce((total, n) => total + n, 0);
 
-const viewsOf = (videos: SignalVideo[]) => videos.map((video) => video.viewCount);
+const viewsOf = (videos: SignalVideo[]) =>
+  videos.map((video) => video.viewCount);
 
 /**
  * Computes every Signal for a Channel from one crawl of it. Pure: the caller passes

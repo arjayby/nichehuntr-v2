@@ -7,8 +7,15 @@ import type { FakeChannel } from "./fakeChannelSource";
 
 export const DAY = 24 * 60 * 60 * 1000;
 
-/** The clock the fixtures are dated against. Tests pass it wherever `now` is needed. */
-export const NOW = Date.UTC(2026, 6, 13);
+/**
+ * The clock the fixtures are dated against. Tests pass it wherever `now` is needed.
+ *
+ * The real clock, not a pinned instant: a crawl judges a Channel against the Entry Bar
+ * and computes its Signals as of `Date.now()`, and both measure a 30-day window back
+ * from it. Fixtures pinned to a fixed date would sail out of that window as real time
+ * passed, and these tests would start failing on a day nobody touched the code.
+ */
+export const NOW = Date.now();
 
 export const longVideo: SourceVideo = {
   youtubeVideoId: "vid_long",

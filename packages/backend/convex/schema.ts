@@ -5,6 +5,7 @@ import {
   sourceVideoValidator,
 } from "./discovery/channelSource";
 import { formValidator } from "./discovery/form";
+import { signalsValidator } from "./discovery/signals";
 
 export default defineSchema({
   /**
@@ -12,10 +13,17 @@ export default defineSchema({
    * has to compute across other documents. Its stats are always *as of*
    * `lastRefreshedAt` — a cached belief about YouTube, never live truth.
    *
-   * A Channel has no Form. It gets Form Shares (ratios) once Signals land.
+   * Its Signals are computed at ingest and stored here, so a search sorts on a number
+   * already on the Channel and never computes across its Videos. Raw subscriber and
+   * total-view counts sit beside them as plain stats: they are filters, never Signals.
+   *
+   * A Channel has no Form — it has two Form Shares, kept separate. There is no
+   * `shorts | longform | mixed` verdict, because any threshold that produced one would
+   * destroy the gap between what a Channel makes and what actually works for it.
    */
   channels: defineTable({
     ...sourceChannelValidator.fields,
+    ...signalsValidator.fields,
     /** When we last read this Channel from a ChannelSource — its Freshness. */
     lastRefreshedAt: v.number(),
   }).index("by_youtube_channel_id", ["youtubeChannelId"]),

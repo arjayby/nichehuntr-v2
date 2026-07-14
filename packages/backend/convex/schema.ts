@@ -36,18 +36,53 @@ export default defineSchema({
 		meetsEntryBar: v.boolean(),
 		/**
 		 * When Refresh last *tried* to read it, which is not the same thing: a crawl that
-		 * failed spent Crawl Budget without earning any Freshness. Refresh queues on this,
-		 * so a Channel deleted on YouTube cannot sit at the head of the queue forever
-		 * being retried ahead of Channels we can actually read.
+		 * failed spent Crawl Budget without earning any Freshness.
 		 *
-		 * Absent on a Channel indexed before we tracked attempts — and absent sorts first,
-		 * which is right: we have no record of ever having tried.
+		 * Nothing queues on this — `refreshDueAt` does. It is kept because the gap between
+		 * the two dates is the only evidence a Channel is being crawled and *failing*: a
+		 * Channel we tried an hour ago and last read three weeks ago is one YouTube has
+		 * deleted, and without this field it is indistinguishable from one we simply never
+		 * got to.
 		 */
 		lastRefreshAttemptedAt: v.optional(v.number()),
+		/**
+		 * How closely this Channel is watched, from 0 to 1 — a function of its Momentum,
+		 * the demand for it, and its volatility. Stored rather than computed at read time
+		 * so that it is *inspectable*: when the index is stale where a user is looking, the
+		 * answer to "why was this Channel not crawled" has to be a number we can read off
+		 * the Channel.
+		 */
+		refreshPriority: v.optional(v.number()),
+		/**
+		 * When this Channel next comes due — its priority, made spendable.
+		 *
+		 * This, and not `refreshPriority`, is what Refresh queues on. A priority sorted
+		 * directly would starve every dull Channel forever, and a dull Channel still has to
+		 * be crawled eventually: it is the only way we would ever learn it had stopped
+		 * being dull, or gone quiet enough to age out. A deadline (last attempt + the
+		 * interval its priority earned) gives the same ordering to a hot Channel — it comes
+		 * due four times as often — while a cold one still reaches the head of the queue by
+		 * waiting.
+		 *
+		 * Absent on a Channel indexed before priority existed, and absent sorts first,
+		 * which is right: we have no record of ever having promised to read it.
+		 */
+		refreshDueAt: v.optional(v.number()),
+		/**
+		 * How much its stats move between Channel Snapshots. Absent until it has two — a
+		 * Channel measured once has not been seen to sit still.
+		 */
+		volatility: v.optional(v.number()),
+		/**
+		 * How many saved Niches this Channel appears in: the demand for it. Absent means
+		 * nobody has saved a Niche that matches it, and so nobody is waiting on its
+		 * Freshness. Maintained by Niches, not by any crawl.
+		 */
+		demand: v.optional(v.number()),
 	})
 		.index("by_youtube_channel_id", ["youtubeChannelId"])
-		/** Least recently *attempted* first: the order Refresh spends its budget in. */
-		.index("by_last_refresh_attempted_at", ["lastRefreshAttemptedAt"]),
+		/** Soonest due first: the order Refresh spends the day's Crawl Budget in. */
+		.index("by_refresh_due_at", ["refreshDueAt"]),
 
 	/**
 	 * A Channel's stats at one moment, appended by every Refresh and never rewritten.
@@ -67,6 +102,27 @@ export default defineSchema({
 		/** When the Channel was read — equal to the Channel's Freshness at that Refresh. */
 		takenAt: v.number(),
 	}).index("by_channel_taken_at", ["channelId", "takenAt"]),
+
+	/**
+	 * One row per day: what that day's Crawl Budget was, what we spent of it, and how
+	 * many Refresh runs it left short.
+	 *
+	 * Crawl Budget is the binding constraint the whole product operates under — index
+	 * size, Freshness and Coverage are all functions of it — so its consumption is a
+	 * domain fact worth storing, not a metric to bolt on later. A day we ran out is a day
+	 * some Channel's stats are older than we promised, and this table is where that shows
+	 * up first.
+	 */
+	crawlBudget: defineTable({
+		/** The UTC day being billed, `YYYY-MM-DD`. */
+		day: v.string(),
+		/** What the quota was *that day*, so a later change to it cannot rewrite history. */
+		budget: v.number(),
+		/** Crawls paid for: a crawl is spent when we decide to try it, not when it works. */
+		spent: v.number(),
+		/** Refresh runs that came up short with Channels still due — deferred, never dropped. */
+		exhaustedRuns: v.number(),
+	}).index("by_day", ["day"]),
 
 	/**
 	 * Every ingested Video for every indexed Channel. Not user-searchable in this

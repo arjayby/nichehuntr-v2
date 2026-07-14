@@ -1,7 +1,17 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, internalMutation } from "./_generated/server";
+import {
+	internalAction,
+	internalMutation,
+	type MutationCtx,
+} from "./_generated/server";
+import {
+	computeVolatility,
+	scheduleRefresh,
+	type TakenStats,
+	VOLATILITY_WINDOW,
+} from "./crawl/priority";
 import {
 	getChannelSource,
 	sourceChannelValidator,
@@ -46,8 +56,30 @@ export const ingestChannel = internalAction({
 });
 
 /**
+ * The Channel's last few Snapshots, oldest first — the only place Snapshots are read
+ * outside the job that computes Growth Metrics, and still never on a search path.
+ */
+async function recentSnapshots(
+	ctx: MutationCtx,
+	channelId: Id<"channels"> | undefined,
+): Promise<TakenStats[]> {
+	if (channelId === undefined) {
+		return [];
+	}
+	const newestFirst = await ctx.db
+		.query("channelSnapshots")
+		.withIndex("by_channel_taken_at", (q) => q.eq("channelId", channelId))
+		.order("desc")
+		.take(VOLATILITY_WINDOW);
+
+	return newestFirst
+		.map((snapshot) => ({ ...statsOf(snapshot), takenAt: snapshot.takenAt }))
+		.reverse();
+}
+
+/**
  * Stores everything one crawl of a Channel learned, if the Entry Bar lets the Channel
- * in. It does four things, and a Refresh is exactly this run a second time:
+ * in. It does five things, and a Refresh is exactly this run a second time:
  *
  * 1. Judges the Channel against the Entry Bar. Admission and age-out are the same
  *    judgement made at the same moment, so the index cannot drift out of step with the
@@ -62,6 +94,9 @@ export const ingestChannel = internalAction({
  * 3. Computes the Channel's Signals from this one crawl and stores them on the Channel
  *    — so a search reads a number off the Channel and never computes across its Videos.
  * 4. Appends a Channel Snapshot, which is how history accrues at all.
+ * 5. Re-prices the Channel's Refresh priority against what it just learned, and books it
+ *    back into the crawl queue at the interval that priority earned. A Channel that just
+ *    turned hot is not left waiting on the interval it had while it was cold.
  */
 export const storeChannel = internalMutation({
 	args: {
@@ -90,9 +125,29 @@ export const storeChannel = internalMutation({
 			return { admitted: false, channelId: null, videosIngested: 0 } as const;
 		}
 
+		const signals = computeSignals({ channel, videos: crawled, now });
+		// What this crawl found, measured against what the last few found: how fast the
+		// Channel moves is the third thing (with Momentum and demand) that decides how
+		// closely it is worth watching. The stats we just read are the newest point in that
+		// history, and they count — a Channel that jumped today is volatile today, not at
+		// its next Refresh.
+		const volatility = computeVolatility([
+			...(await recentSnapshots(ctx, existing?._id)),
+			{ ...statsOf(channel), takenAt: now },
+		]);
+
 		const channelFields = {
 			...channel,
-			...computeSignals({ channel, videos: crawled, now }),
+			...signals,
+			volatility,
+			...scheduleRefresh(
+				{
+					momentum: signals.momentum,
+					demand: existing?.demand,
+					volatility,
+				},
+				now,
+			),
 			lastRefreshedAt: now,
 			lastRefreshAttemptedAt: now,
 			meetsEntryBar,

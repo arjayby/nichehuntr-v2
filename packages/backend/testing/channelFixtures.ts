@@ -53,3 +53,26 @@ export const aChannel = (
 	videos: [longVideo, shortVideo],
 	...overrides,
 });
+
+/** A Video doing exactly what this Channel's lifetime average Video does: 4m / 120. */
+export const averageVideo: SourceVideo = {
+	youtubeVideoId: "vid_average",
+	title: "Watering, again",
+	publishedAt: NOW - 3 * DAY,
+	viewCount: 33_333,
+	durationSeconds: 11 * 60,
+};
+
+/**
+ * A Channel performing at its own lifetime average — a Momentum of 1. It clears the
+ * Entry Bar and is worth indexing; it is simply not heating up, and so is not worth
+ * watching closely. The counterweight to `aChannel` in every priority test.
+ */
+export const flatChannel = (
+	overrides: Partial<FakeChannel> = {},
+): FakeChannel =>
+	aChannel({
+		youtubeChannelId: "UC_flat",
+		videos: [averageVideo],
+		...overrides,
+	});

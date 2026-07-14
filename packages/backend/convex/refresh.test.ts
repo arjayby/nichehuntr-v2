@@ -1,17 +1,38 @@
 import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { aChannel, DAY, longVideo } from "../testing/channelFixtures";
+import {
+	aChannel,
+	DAY,
+	flatChannel,
+	longVideo,
+} from "../testing/channelFixtures";
 import {
 	createFakeChannelSource,
 	type FakeChannel,
 } from "../testing/fakeChannelSource";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { DAILY_CRAWL_BUDGET, recordCrawlSpend } from "./crawl/budget";
 import crons from "./crons";
 import { setChannelSource } from "./discovery/channelSource";
+import { CRAWL_BUDGET_PER_RUN, REFRESH_RUNS_PER_DAY } from "./refresh";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
+
+const HOUR = 60 * 60 * 1000;
+
+/** Leaves the day's Crawl Budget spent, so the next run cannot afford anything. */
+const spendTheDay = (t: ReturnType<typeof convexTest>) =>
+	t.run((ctx) =>
+		recordCrawlSpend(ctx, { now: Date.now(), crawls: DAILY_CRAWL_BUDGET }),
+	);
+
+/** How many Snapshots we hold of one Channel: how often it was actually Refreshed. */
+const refreshCount = (
+	snapshots: { channelId: Id<"channels"> }[],
+	channelId: Id<"channels"> | undefined,
+) => snapshots.filter((snapshot) => snapshot.channelId === channelId).length;
 
 const setup = (seed: FakeChannel[]) => {
 	const source = createFakeChannelSource(seed);
@@ -28,7 +49,11 @@ const setup = (seed: FakeChannel[]) => {
 			await t.action(internal.ingestion.ingestChannel, { youtubeChannelId });
 		},
 
-		/** Ages a Channel, so that it is due a Refresh again. */
+		/**
+		 * Ages a Channel, so that it is due a Refresh again. Its deadline moves back with
+		 * it, so a Channel aged further is one that came due earlier — the order the crawl
+		 * queue is worked in.
+		 */
 		async age(youtubeChannelId: string, by: number) {
 			await t.run(async (ctx) => {
 				const channel = await ctx.db
@@ -40,12 +65,29 @@ const setup = (seed: FakeChannel[]) => {
 				await ctx.db.patch(channel?._id as Id<"channels">, {
 					lastRefreshedAt: Date.now() - by,
 					lastRefreshAttemptedAt: Date.now() - by,
+					refreshDueAt: (channel?.refreshDueAt ?? Date.now()) - by,
+				});
+			});
+		},
+
+		/** Puts the Channel in users' saved Niches, so someone is waiting on it. */
+		async demand(youtubeChannelId: string, savedNiches: number) {
+			await t.run(async (ctx) => {
+				const channel = await ctx.db
+					.query("channels")
+					.withIndex("by_youtube_channel_id", (q) =>
+						q.eq("youtubeChannelId", youtubeChannelId),
+					)
+					.unique();
+				await ctx.db.patch(channel?._id as Id<"channels">, {
+					demand: savedNiches,
 				});
 			});
 		},
 
 		channels: () => t.run((ctx) => ctx.db.query("channels").collect()),
 		snapshots: () => t.run((ctx) => ctx.db.query("channelSnapshots").collect()),
+		budget: () => t.query(internal.crawl.budget.consumption, {}),
 	};
 };
 
@@ -328,20 +370,182 @@ describe("refreshDueChannels", () => {
 		expect(readmitted[0]?._id).toBe(first?._id);
 	});
 
-	it("Refreshes a Channel indexed before we tracked Refresh attempts at all", async () => {
+	it("Refreshes a Channel indexed before Refresh had a priority at all", async () => {
 		const seeded = aChannel();
 		const { t, source, index, channels, settle } = setup([seeded]);
 		await index("UC_bonsai");
-		// A Channel from before this field existed has never recorded an attempt, and is
+		// A Channel from before these fields existed was never promised a Refresh, and is
 		// the most overdue thing in the index — not the least.
 		await t.run(async (ctx) => {
 			const [channel] = await ctx.db.query("channels").collect();
 			await ctx.db.patch(channel?._id as Id<"channels">, {
 				lastRefreshAttemptedAt: undefined,
+				refreshDueAt: undefined,
+				refreshPriority: undefined,
 			});
 		});
 
 		source.set({ ...seeded, subscriberCount: 40_000 });
+		await t.action(internal.refresh.refreshDueChannels, {});
+		await settle();
+
+		const [refreshed] = await channels();
+		expect(refreshed?.subscriberCount).toBe(40_000);
+	});
+});
+
+describe("Refresh priority", () => {
+	it("Refreshes a high-Momentum Channel more often than a flat one", async () => {
+		// Two Channels crawled side by side for a fortnight. One is doing far better than
+		// its own lifetime average; the other is doing exactly it. Uniform Refresh would
+		// read them the same number of times, and half those crawls would buy nothing.
+		const { t, index, channels, snapshots, settle } = setup([
+			aChannel({ youtubeChannelId: "UC_hot" }),
+			flatChannel({ youtubeChannelId: "UC_flat" }),
+		]);
+		await index("UC_hot");
+		await index("UC_flat");
+
+		for (let tick = 0; tick < 14 * 4; tick++) {
+			vi.advanceTimersByTime(6 * HOUR);
+			await t.action(internal.refresh.refreshDueChannels, {});
+			await settle();
+		}
+
+		const indexed = await channels();
+		const idOf = (youtubeChannelId: string) =>
+			indexed.find((channel) => channel.youtubeChannelId === youtubeChannelId)
+				?._id;
+		const taken = await snapshots();
+
+		expect(refreshCount(taken, idOf("UC_hot"))).toBeGreaterThan(
+			refreshCount(taken, idOf("UC_flat")),
+		);
+	});
+
+	it("watches a Channel sitting in users' saved Niches more closely", async () => {
+		// Demand is not a fact about the Channel — it is a fact about who is about to look
+		// at it. A Channel in a saved Niche is one whose Freshness a user will judge us on.
+		const { t, index, demand, channels, settle } = setup([
+			flatChannel({ youtubeChannelId: "UC_unsaved" }),
+			flatChannel({ youtubeChannelId: "UC_wanted" }),
+		]);
+		await index("UC_unsaved");
+		await index("UC_wanted");
+
+		// Two Channels nobody would otherwise watch closely. One of them is in five saved
+		// Niches, and the next claim re-prices it on that.
+		await demand("UC_wanted", 5);
+		vi.advanceTimersByTime(8 * DAY);
+		await t.action(internal.refresh.refreshDueChannels, {});
+		await settle();
+
+		const priority = new Map(
+			(await channels()).map((channel) => [
+				channel.youtubeChannelId,
+				channel.refreshPriority ?? 0,
+			]),
+		);
+		expect(priority.get("UC_wanted")).toBeGreaterThan(
+			priority.get("UC_unsaved") as number,
+		);
+	});
+
+	it("spends a short budget on the Channel it is watching most closely", async () => {
+		// The ticket in one test: when there is not enough budget for everything that has
+		// come due, the crawl goes to the Channel whose stats we most expect to be wrong —
+		// not to whichever one the index happens to list first.
+		const { t, index, channels, snapshots, settle } = setup([
+			flatChannel({ youtubeChannelId: "UC_flat" }),
+			aChannel({ youtubeChannelId: "UC_hot" }),
+		]);
+		await index("UC_flat");
+		await index("UC_hot");
+
+		// Long enough that both have come due, and a budget for exactly one of them.
+		vi.advanceTimersByTime(8 * DAY);
+		await t.action(internal.refresh.refreshDueChannels, { limit: 1 });
+		await settle();
+
+		const indexed = await channels();
+		const hot = indexed.find(
+			(channel) => channel.youtubeChannelId === "UC_hot",
+		);
+		const flat = indexed.find(
+			(channel) => channel.youtubeChannelId === "UC_flat",
+		);
+		const taken = await snapshots();
+		expect(refreshCount(taken, hot?._id)).toBe(2);
+		expect(refreshCount(taken, flat?._id)).toBe(1);
+	});
+});
+
+describe("Crawl Budget", () => {
+	it("reports what the day's Refreshes have spent, and what is left", async () => {
+		const seeded = ["UC_one", "UC_two"].map((youtubeChannelId) =>
+			aChannel({ youtubeChannelId }),
+		);
+		const { t, index, age, budget, settle } = setup(seeded);
+		for (const channel of seeded) {
+			await index(channel.youtubeChannelId);
+			await age(channel.youtubeChannelId, 30 * DAY);
+		}
+
+		await t.action(internal.refresh.refreshDueChannels, {});
+		await settle();
+
+		expect(await budget()).toMatchObject({
+			spent: 2,
+			remaining: DAILY_CRAWL_BUDGET - 2,
+			exhaustedRuns: 0,
+		});
+	});
+
+	it("defers the Refreshes it cannot pay for rather than dropping them", async () => {
+		const seeded = aChannel();
+		const { t, source, index, age, channels, snapshots, budget, settle } =
+			setup([seeded]);
+		await index("UC_bonsai");
+		await age("UC_bonsai", 30 * DAY);
+		await spendTheDay(t);
+
+		source.set({ ...seeded, subscriberCount: 40_000 });
+		await t.action(internal.refresh.refreshDueChannels, {});
+		await settle();
+
+		// Nothing was crawled — and nothing was lost. The Channel keeps the deadline it
+		// came due on, so it is first in line the moment there is budget for it again.
+		expect(await snapshots()).toHaveLength(1);
+		const [deferred] = await channels();
+		expect(deferred?.refreshDueAt).toBeLessThanOrEqual(Date.now());
+		// And the shortfall is on the day's ledger: this is the index degrading, and we can
+		// see it before a user does.
+		expect(await budget()).toMatchObject({ remaining: 0, exhaustedRuns: 1 });
+	});
+
+	it("is what actually bounds a day of Refreshing, and not the per-run cap", () => {
+		// A per-run cap chosen independently of the budget would quietly become the real
+		// constraint: the ledger would show budget going spare every day while Channels sat
+		// overdue, and the Crawl Budget we reason about would not be the one we are rationed
+		// by. A day of scheduled runs must be able to spend the day.
+		expect(CRAWL_BUDGET_PER_RUN * REFRESH_RUNS_PER_DAY).toBeGreaterThanOrEqual(
+			DAILY_CRAWL_BUDGET,
+		);
+	});
+
+	it("Refreshes the deferred Channel once the budget refills", async () => {
+		const seeded = aChannel();
+		const { t, source, index, age, channels, settle } = setup([seeded]);
+		await index("UC_bonsai");
+		await age("UC_bonsai", 30 * DAY);
+		await spendTheDay(t);
+
+		await t.action(internal.refresh.refreshDueChannels, {});
+		await settle();
+		source.set({ ...seeded, subscriberCount: 40_000 });
+
+		// Tomorrow: a fresh quota, and the Channel we could not afford yesterday.
+		vi.advanceTimersByTime(1 * DAY);
 		await t.action(internal.refresh.refreshDueChannels, {});
 		await settle();
 

@@ -1,18 +1,25 @@
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it } from "vitest";
-import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
-import { setChannelSource, type SourceVideo } from "./discovery/channelSource";
 import {
   createFakeChannelSource,
   type FakeChannel,
 } from "../testing/fakeChannelSource";
+import { internal } from "./_generated/api";
+import type { Doc } from "./_generated/dataModel";
+import { type SourceVideo, setChannelSource } from "./discovery/channelSource";
+import { MINIMUM_RECENT_VIEWS } from "./discovery/entryBar";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
 
 const DAY = 24 * 60 * 60 * 1000;
-const now = Date.UTC(2026, 6, 13);
+
+/**
+ * Fixture Videos are dated relative to the real clock, not a fixed instant: the Entry
+ * Bar reads `Date.now()` and measures a 30-day window against it, so a pinned `now`
+ * would drift out of that window and start failing these tests on its own.
+ */
+const now = Date.now();
 
 const longVideo: SourceVideo = {
   youtubeVideoId: "vid_long",
@@ -182,7 +189,7 @@ describe("ingestChannel", () => {
         youtubeVideoId: `vid_${index}`,
         title: `Episode ${index}`,
         publishedAt: now - index * DAY,
-        viewCount: 1_000,
+        viewCount: 50_000,
         durationSeconds: 300,
       })),
     });
@@ -211,5 +218,188 @@ describe("ingestChannel", () => {
 
     const channels = await t.run((ctx) => ctx.db.query("channels").collect());
     expect(channels).toHaveLength(0);
+  });
+});
+
+/**
+ * The Entry Bar is not a Signal and has no seam of its own — it is exercised here,
+ * through ingestion, by feeding fixture Videos in via the ChannelSource fake.
+ */
+describe("the Entry Bar", () => {
+  /** A Video old enough to have left the recent-views window entirely. */
+  const dormantVideo: SourceVideo = {
+    youtubeVideoId: "vid_glory_days",
+    title: "The one that did numbers, once",
+    publishedAt: now - 400 * DAY,
+    viewCount: 12_000_000,
+    durationSeconds: 11 * 60,
+  };
+
+  const channelsIn = (t: ReturnType<typeof setup>["t"]) =>
+    t.run((ctx) => ctx.db.query("channels").collect());
+
+  it("admits a Channel on recent views alone, however few subscribers it has", async () => {
+    const { t } = setup([
+      aChannel({
+        subscriberCount: 300,
+        totalViewCount: 800_000,
+        videos: [{ ...shortVideo, viewCount: 800_000 }],
+      }),
+    ]);
+
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(true);
+    expect(await channelsIn(t)).toHaveLength(1);
+  });
+
+  it("rejects a dormant Channel, however many subscribers it has", async () => {
+    const { t } = setup([
+      aChannel({
+        subscriberCount: 50_000,
+        totalViewCount: 12_000_000,
+        videos: [dormantVideo],
+      }),
+    ]);
+
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(false);
+    expect(await channelsIn(t)).toHaveLength(0);
+    expect(await t.run((ctx) => ctx.db.query("videos").collect())).toHaveLength(
+      0,
+    );
+  });
+
+  it("rejects a Channel whose recent Videos fall short of the bar", async () => {
+    const { t } = setup([
+      aChannel({
+        videos: [{ ...shortVideo, viewCount: MINIMUM_RECENT_VIEWS - 1 }],
+      }),
+    ]);
+
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(false);
+    expect(await channelsIn(t)).toHaveLength(0);
+  });
+
+  it("counts a Channel's recent Videos together against the bar", async () => {
+    const half = Math.ceil(MINIMUM_RECENT_VIEWS / 2);
+    const { t } = setup([
+      aChannel({
+        videos: [
+          { ...shortVideo, viewCount: half },
+          { ...longVideo, viewCount: half },
+        ],
+      }),
+    ]);
+
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(true);
+  });
+
+  it("ages an indexed Channel out of the index once its uploads go quiet", async () => {
+    const seeded = aChannel();
+    const { t, source } = setup([seeded]);
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+    expect((await channelsIn(t))[0]?.meetsEntryBar).toBe(true);
+
+    // The Channel stopped uploading: its last Videos have aged out of the window,
+    // and its subscribers and back-catalogue views cannot save it.
+    source.set({
+      ...seeded,
+      subscriberCount: 200_000,
+      videos: [dormantVideo],
+    });
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(false);
+    const [channel] = await channelsIn(t);
+    expect(channel?.meetsEntryBar).toBe(false);
+  });
+
+  it("keeps an aged-out Channel's history, so a recovery is not amnesiac", async () => {
+    const seeded = aChannel();
+    const { t, source } = setup([seeded]);
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+    const [first] = await channelsIn(t);
+
+    source.set({ ...seeded, videos: [dormantVideo] });
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    // The row survives the dip, under its original id: a Channel that comes back must
+    // still own the Snapshot history we could never backfill for it.
+    const channels = await channelsIn(t);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]?._id).toBe(first?._id);
+    expect(
+      await t.run((ctx) => ctx.db.query("videos").collect()),
+    ).not.toHaveLength(0);
+  });
+
+  it("re-admits an aged-out Channel that starts clearing the bar again", async () => {
+    const seeded = aChannel();
+    const { t, source } = setup([seeded]);
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+    const [first] = await channelsIn(t);
+
+    // It goes quiet and drops out of the index...
+    source.set({ ...seeded, videos: [dormantVideo] });
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+    expect((await channelsIn(t))[0]?.meetsEntryBar).toBe(false);
+
+    // ...then uploads something that works, and is back in.
+    source.set(seeded);
+    const result = await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    expect(result.admitted).toBe(true);
+    const channels = await channelsIn(t);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]?.meetsEntryBar).toBe(true);
+    expect(channels[0]?._id).toBe(first?._id);
+  });
+
+  it("keeps an indexed Channel that is still clearing the bar", async () => {
+    const seeded = aChannel();
+    const { t, source } = setup([seeded]);
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+    const [first] = await channelsIn(t);
+
+    source.set({ ...seeded, subscriberCount: 15_000 });
+    await t.action(internal.ingestion.ingestChannel, {
+      youtubeChannelId: "UC_bonsai",
+    });
+
+    const channels = await channelsIn(t);
+    expect(channels).toHaveLength(1);
+    expect(channels[0]?._id).toBe(first?._id);
+    expect(channels[0]?.subscriberCount).toBe(15_000);
+    expect(channels[0]?.meetsEntryBar).toBe(true);
   });
 });

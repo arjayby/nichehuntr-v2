@@ -18,6 +18,13 @@ export default defineSchema({
     ...sourceChannelValidator.fields,
     /** When we last read this Channel from a ChannelSource — its Freshness. */
     lastRefreshedAt: v.number(),
+    /**
+     * Whether the Channel still clears the Entry Bar — its Entry Bar status. A Channel
+     * that goes quiet is flagged `false` and drops out of the index users search; the
+     * row stays so its Channel Snapshot history survives the dip, because history
+     * cannot be backfilled and a Channel that recovers must not come back amnesiac.
+     */
+    meetsEntryBar: v.boolean(),
   }).index("by_youtube_channel_id", ["youtubeChannelId"]),
 
   /**

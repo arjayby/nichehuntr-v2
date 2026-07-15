@@ -11,22 +11,27 @@ import {
 	createFakeChannelSource,
 	type FakeChannel,
 } from "../testing/fakeChannelSource";
+import { createFakeSearchIndex } from "../testing/fakeSearchIndex";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { type SourceVideo, setChannelSource } from "./discovery/channelSource";
 import { MINIMUM_RECENT_VIEWS } from "./discovery/entryBar";
 import schema from "./schema";
+import { setSearchIndex } from "./search/searchIndex";
 
 const modules = import.meta.glob("./**/*.*s");
 
 const setup = (seed: FakeChannel[]) => {
 	const source = createFakeChannelSource(seed);
 	setChannelSource(source);
-	return { t: convexTest(schema, modules), source };
+	const search = createFakeSearchIndex();
+	setSearchIndex(search);
+	return { t: convexTest(schema, modules), source, search };
 };
 
 afterEach(() => {
 	setChannelSource(null);
+	setSearchIndex(null);
 });
 
 describe("ingestChannel", () => {

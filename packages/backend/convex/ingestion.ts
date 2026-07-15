@@ -21,6 +21,7 @@ import { statsOf } from "./discovery/channelStats";
 import { passesEntryBar } from "./discovery/entryBar";
 import { deriveForm } from "./discovery/form";
 import { computeSignals } from "./discovery/signals";
+import { computeGrowth, growthAnchors } from "./growth";
 
 /** How many recent Videos one crawl of a Channel reads. */
 const RECENT_VIDEO_LIMIT = 50;
@@ -79,7 +80,7 @@ async function recentSnapshots(
 
 /**
  * Stores everything one crawl of a Channel learned, if the Entry Bar lets the Channel
- * in. It does five things, and a Refresh is exactly this run a second time:
+ * in. It does six things, and a Refresh is exactly this run a second time:
  *
  * 1. Judges the Channel against the Entry Bar. Admission and age-out are the same
  *    judgement made at the same moment, so the index cannot drift out of step with the
@@ -94,7 +95,12 @@ async function recentSnapshots(
  * 3. Computes the Channel's Signals from this one crawl and stores them on the Channel
  *    — so a search reads a number off the Channel and never computes across its Videos.
  * 4. Appends a Channel Snapshot, which is how history accrues at all.
- * 5. Re-prices the Channel's Refresh priority against what it just learned, and books it
+ * 5. Subtracts older Snapshots from the current stats to denormalise the Channel's Growth
+ *    Metrics onto it, so a search sorts a rising Channel above a merely large one without
+ *    computing across Snapshots. A window with no Snapshot old enough to anchor it stays
+ *    unavailable, which on a Channel we have only just started crawling is every window
+ *    but the shortest.
+ * 6. Re-prices the Channel's Refresh priority against what it just learned, and books it
  *    back into the crawl queue at the interval that priority earned. A Channel that just
  *    turned hot is not left waiting on the interval it had while it was cold.
  */
@@ -136,9 +142,19 @@ export const storeChannel = internalMutation({
 			{ ...statsOf(channel), takenAt: now },
 		]);
 
+		// Every window's growth against the Snapshot anchoring it. A Channel we are seeing
+		// for the first time has no history to subtract, so every window comes back
+		// unavailable — the honest reading until its Snapshots have had time to accrue.
+		const growth = computeGrowth({
+			current: statsOf(channel),
+			anchors:
+				existing === null ? {} : await growthAnchors(ctx, existing._id, now),
+		});
+
 		const channelFields = {
 			...channel,
 			...signals,
+			...growth,
 			volatility,
 			...scheduleRefresh(
 				{

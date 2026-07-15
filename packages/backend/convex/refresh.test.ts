@@ -553,3 +553,131 @@ describe("Crawl Budget", () => {
 		expect(refreshed?.subscriberCount).toBe(40_000);
 	});
 });
+
+describe("Growth Metrics", () => {
+	/**
+	 * A crawl of a Channel as it looks *now*, still uploading so it clears the Entry Bar as
+	 * the clock advances: its recent Video is always dated against the current instant, so
+	 * the Channel never ages out mid-test and the only thing moving between crawls is the
+	 * stats a Growth Metric subtracts. Its Video is namespaced to the Channel so two
+	 * Channels in one test do not fight over one Video row.
+	 */
+	const stillUploading = (
+		youtubeChannelId: string,
+		subscriberCount: number,
+		totalViewCount: number,
+	): FakeChannel =>
+		aChannel({
+			youtubeChannelId,
+			subscriberCount,
+			totalViewCount,
+			videos: [
+				{
+					...longVideo,
+					youtubeVideoId: `${youtubeChannelId}_recent`,
+					publishedAt: Date.now() - DAY,
+				},
+			],
+		});
+
+	it("subtracts each window's anchor Snapshot from the current stats", async () => {
+		const { source, index, channels } = setup([
+			stillUploading("UC_bonsai", 10_000, 3_000_000),
+		]);
+		// A reading a quarter ago...
+		await index("UC_bonsai");
+
+		// ...one a month ago...
+		vi.advanceTimersByTime(60 * DAY);
+		source.set(stillUploading("UC_bonsai", 15_000, 4_000_000));
+		await index("UC_bonsai");
+
+		// ...one a week ago...
+		vi.advanceTimersByTime(23 * DAY);
+		source.set(stillUploading("UC_bonsai", 19_000, 4_900_000));
+		await index("UC_bonsai");
+
+		// ...and today.
+		vi.advanceTimersByTime(7 * DAY);
+		source.set(stillUploading("UC_bonsai", 20_000, 5_000_000));
+		await index("UC_bonsai");
+
+		// 7-day growth is measured against the reading from a week ago, 30-day against a
+		// month ago, 90-day against a quarter ago: three different Snapshots subtracted
+		// from the one set of current stats give three different numbers.
+		const [channel] = await channels();
+		expect(channel).toMatchObject({
+			subscribersGained7d: 1_000,
+			viewsGained7d: 100_000,
+			subscribersGained30d: 5_000,
+			viewsGained30d: 1_000_000,
+			subscribersGained90d: 10_000,
+			viewsGained90d: 2_000_000,
+		});
+	});
+
+	it("reports a window as unavailable, not zero, until a Snapshot old enough anchors it", async () => {
+		const { source, index, channels } = setup([
+			stillUploading("UC_bonsai", 10_000, 3_000_000),
+		]);
+		await index("UC_bonsai");
+
+		// Only a week of history: the 7-day window can be measured, the longer ones cannot.
+		vi.advanceTimersByTime(7 * DAY);
+		source.set(stillUploading("UC_bonsai", 11_000, 3_100_000));
+		await index("UC_bonsai");
+
+		const [channel] = await channels();
+		expect(channel?.subscribersGained7d).toBe(1_000);
+		// Unavailable is absent, not a zero that would call the Channel flat, and not a
+		// sentinel that would sort it below a Channel we watched decline.
+		expect(channel).not.toHaveProperty("subscribersGained30d");
+		expect(channel).not.toHaveProperty("viewsGained30d");
+		expect(channel).not.toHaveProperty("subscribersGained90d");
+		expect(channel).not.toHaveProperty("viewsGained90d");
+	});
+
+	it("reports every window as unavailable on a Channel measured only once", async () => {
+		const { index, channels } = setup([
+			stillUploading("UC_bonsai", 10_000, 3_000_000),
+		]);
+		await index("UC_bonsai");
+
+		// Growth is a fact about two Snapshots subtracted, and there is only one. No window
+		// can be measured, and none of them is reported as zero.
+		const [channel] = await channels();
+		for (const window of ["7d", "30d", "90d"]) {
+			expect(channel).not.toHaveProperty(`subscribersGained${window}`);
+			expect(channel).not.toHaveProperty(`viewsGained${window}`);
+		}
+	});
+
+	it("gives two Channels with identical current stats but different histories different Growth", async () => {
+		const { source, index, channels } = setup([
+			stillUploading("UC_climber", 10_000, 3_000_000),
+			stillUploading("UC_plateau", 19_000, 4_950_000),
+		]);
+		await index("UC_climber");
+		await index("UC_plateau");
+
+		// A month on, both read exactly 20k subscribers and 5m views...
+		vi.advanceTimersByTime(30 * DAY);
+		source.set(stillUploading("UC_climber", 20_000, 5_000_000));
+		source.set(stillUploading("UC_plateau", 20_000, 5_000_000));
+		await index("UC_climber");
+		await index("UC_plateau");
+
+		const byId = new Map(
+			(await channels()).map((channel) => [channel.youtubeChannelId, channel]),
+		);
+		const climber = byId.get("UC_climber");
+		const plateau = byId.get("UC_plateau");
+
+		// ...but one climbed to get there and the other barely moved, and only Growth,
+		// which is a fact about two Snapshots and not about the current one, tells them
+		// apart.
+		expect(climber?.subscriberCount).toBe(plateau?.subscriberCount);
+		expect(climber?.subscribersGained30d).toBe(10_000);
+		expect(plateau?.subscribersGained30d).toBe(1_000);
+	});
+});

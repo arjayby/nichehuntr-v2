@@ -7,6 +7,7 @@ import {
 import { channelStatsValidator } from "./discovery/channelStats";
 import { formValidator } from "./discovery/form";
 import { signalsValidator } from "./discovery/signals";
+import { growthValidator } from "./growth";
 
 export default defineSchema({
 	/**
@@ -25,6 +26,14 @@ export default defineSchema({
 	channels: defineTable({
 		...sourceChannelValidator.fields,
 		...signalsValidator.fields,
+		/**
+		 * How much this Channel has grown over the last 7 / 30 / 90 days, subtracted from
+		 * its Channel Snapshots and denormalised onto it so a search can filter and sort
+		 * without computing across other documents. Each window is absent until a Snapshot
+		 * old enough to anchor it exists — unavailable, never zero, so an unmeasurable
+		 * Channel never sorts below one measured and found declining. See `growth.ts`.
+		 */
+		...growthValidator.fields,
 		/** When we last read this Channel from a ChannelSource — its Freshness. */
 		lastRefreshedAt: v.number(),
 		/**

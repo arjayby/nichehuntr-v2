@@ -121,7 +121,7 @@ export const claimDueChannels = internalMutation({
  */
 export const refreshDueChannels = internalAction({
 	args: { limit: v.optional(v.number()) },
-	handler: async (ctx, args) => {
+	handler: async (ctx, args): Promise<{ channelsScheduled: number }> => {
 		const claimed = await ctx.runMutation(internal.refresh.claimDueChannels, {
 			limit: args.limit,
 		});

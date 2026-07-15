@@ -22,7 +22,24 @@ import { passesEntryBar } from "./discovery/entryBar";
 import { deriveForm } from "./discovery/form";
 import { computeSignals } from "./discovery/signals";
 import { computeGrowth, growthAnchors } from "./growth";
-import { getSearchIndex, projectChannel } from "./search/searchIndex";
+import {
+	getSearchIndex,
+	projectChannel,
+	type SearchDocument,
+} from "./search/searchIndex";
+
+/**
+ * What a crawl records: whether the Channel is in the index, the row it wrote, how many
+ * Videos it stored, and the search projection to sync (null when nothing is searchable).
+ * Named explicitly so `storeChannel` and `ingestChannel` can annotate their return types
+ * and break the self-referential inference cycle Convex would otherwise hit.
+ */
+export type StoreChannelResult = {
+	admitted: boolean;
+	channelId: Id<"channels"> | null;
+	videosIngested: number;
+	projection: SearchDocument | null;
+};
 
 /**
  * How many recent Videos one crawl of a Channel reads. A rebuild of the search projection
@@ -42,7 +59,7 @@ export const ingestChannel = internalAction({
 		youtubeChannelId: v.string(),
 		videoLimit: v.optional(v.number()),
 	},
-	handler: async (ctx, args) => {
+	handler: async (ctx, args): Promise<StoreChannelResult> => {
 		const source = getChannelSource();
 
 		const channel = await source.getChannel(args.youtubeChannelId);
@@ -138,7 +155,7 @@ export const storeChannel = internalMutation({
 		channel: sourceChannelValidator,
 		videos: v.array(sourceVideoValidator),
 	},
-	handler: async (ctx, { channel, videos }) => {
+	handler: async (ctx, { channel, videos }): Promise<StoreChannelResult> => {
 		const now = Date.now();
 		const crawled = videos.map((video) => ({
 			...video,

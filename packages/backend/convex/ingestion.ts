@@ -22,9 +22,13 @@ import { passesEntryBar } from "./discovery/entryBar";
 import { deriveForm } from "./discovery/form";
 import { computeSignals } from "./discovery/signals";
 import { computeGrowth, growthAnchors } from "./growth";
+import { getSearchIndex, projectChannel } from "./search/searchIndex";
 
-/** How many recent Videos one crawl of a Channel reads. */
-const RECENT_VIDEO_LIMIT = 50;
+/**
+ * How many recent Videos one crawl of a Channel reads. A rebuild of the search projection
+ * reproduces the same recent-Videos set from Convex, so it reads this too.
+ */
+export const RECENT_VIDEO_LIMIT = 50;
 
 /**
  * Reads a Channel and its recent Videos from the ChannelSource and stores them, if
@@ -49,10 +53,35 @@ export const ingestChannel = internalAction({
 			limit: args.videoLimit ?? RECENT_VIDEO_LIMIT,
 		});
 
-		return await ctx.runMutation(internal.ingestion.storeChannel, {
+		const stored = await ctx.runMutation(internal.ingestion.storeChannel, {
 			channel,
 			videos,
 		});
+
+		// Sync the Channel's projection into the search engine after Convex has committed it.
+		// This is the one place a crawl touches the engine, and it happens here in the action
+		// rather than in the mutation because only an action may reach outside Convex.
+		//
+		// The projection is derived, eventually-consistent data: Convex is already the system
+		// of record, so an engine that is briefly down must not fail a crawl that has already
+		// spent its Crawl Budget and written the truth. A failed sync leaves search a little
+		// stale until the next Refresh or a rebuild re-projects the Channel — never wrong at
+		// the source (see `docs/adr/0001-external-search-engine-for-channel-search.md`).
+		if (stored.projection !== null) {
+			try {
+				await getSearchIndex().upsert([stored.projection]);
+			} catch (error) {
+				// Resolving the engine is inside the guard too: with no engine configured — the
+				// state before one is wired up — this must degrade to a stale projection, not a
+				// failed crawl. Anything wrong with the sync leaves Convex untouched and correct.
+				console.error(
+					`Search projection failed for ${args.youtubeChannelId}; Convex remains the source of record`,
+					error,
+				);
+			}
+		}
+
+		return stored;
 	},
 });
 
@@ -128,7 +157,14 @@ export const storeChannel = internalMutation({
 		// keep.
 		const meetsEntryBar = passesEntryBar(videos, now);
 		if (existing === null && !meetsEntryBar) {
-			return { admitted: false, channelId: null, videosIngested: 0 } as const;
+			return {
+				admitted: false,
+				channelId: null,
+				videosIngested: 0,
+				// A Channel outside the index projects to nothing: there is no searchable
+				// Channel to sync, and no row for a later rebuild to find either.
+				projection: null,
+			} as const;
 		}
 
 		const signals = computeSignals({ channel, videos: crawled, now });
@@ -202,10 +238,22 @@ export const storeChannel = internalMutation({
 			}
 		}
 
+		// The Channel's search projection, derived from the same crawl that wrote it: the
+		// text a keyword matches — its title, description and its Videos' titles — beside the
+		// numbers a search filters and sorts on. A Channel that has fallen below the Entry Bar
+		// is projected too, carrying `meetsEntryBar: false`, so it drops out of search results
+		// without being deleted and a rebuild agrees with this incremental sync on what the
+		// engine holds. The action returns this to the engine; the mutation only builds it.
+		const projection = projectChannel(
+			channelFields,
+			crawled.map((video) => video.title),
+		);
+
 		return {
 			admitted: meetsEntryBar,
 			channelId,
 			videosIngested: crawled.length,
+			projection,
 		} as const;
 	},
 });

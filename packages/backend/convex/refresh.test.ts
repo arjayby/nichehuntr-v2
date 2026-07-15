@@ -10,6 +10,7 @@ import {
 	createFakeChannelSource,
 	type FakeChannel,
 } from "../testing/fakeChannelSource";
+import { createFakeSearchIndex } from "../testing/fakeSearchIndex";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { DAILY_CRAWL_BUDGET, recordCrawlSpend } from "./crawl/budget";
@@ -17,6 +18,7 @@ import crons from "./crons";
 import { setChannelSource } from "./discovery/channelSource";
 import { CRAWL_BUDGET_PER_RUN, REFRESH_RUNS_PER_DAY } from "./refresh";
 import schema from "./schema";
+import { setSearchIndex } from "./search/searchIndex";
 
 const modules = import.meta.glob("./**/*.*s");
 
@@ -37,10 +39,13 @@ const refreshCount = (
 const setup = (seed: FakeChannel[]) => {
 	const source = createFakeChannelSource(seed);
 	setChannelSource(source);
+	const search = createFakeSearchIndex();
+	setSearchIndex(search);
 	const t = convexTest(schema, modules);
 	return {
 		t,
 		source,
+		search,
 		/** Runs the crawls a Refresh scheduled, and waits for them to land. */
 		settle: () => t.finishAllScheduledFunctions(vi.runAllTimers),
 
@@ -100,6 +105,7 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 	setChannelSource(null);
+	setSearchIndex(null);
 });
 
 describe("a Refresh", () => {

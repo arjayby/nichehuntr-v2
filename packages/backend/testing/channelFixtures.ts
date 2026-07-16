@@ -3,6 +3,7 @@
  * numbers mean the same thing in every file that reads them.
  */
 import type { SourceVideo } from "../convex/discovery/channelSource";
+import type { SearchDocument } from "../convex/search/searchIndex";
 import type { FakeChannel } from "./fakeChannelSource";
 
 export const DAY = 24 * 60 * 60 * 1000;
@@ -51,6 +52,31 @@ export const aChannel = (
 	videoCount: 120,
 	publishedAt: NOW - 400 * DAY,
 	videos: [longVideo, shortVideo],
+	...overrides,
+});
+
+/**
+ * A Channel already projected into the search engine, with sane defaults, so a search test
+ * states only the fields it is about. It carries the same numbers as `aChannel` where the two
+ * overlap, so a fixture means one thing whether a test crawls it or seeds it straight into the
+ * index.
+ *
+ * Every Channel here clears the Entry Bar unless a test says otherwise, and every optional
+ * Signal is absent unless a test sets it — an unmeasured Channel is the default, because that
+ * is what a freshly discovered Channel actually is.
+ */
+export const aSearchDocument = (
+	overrides: Partial<SearchDocument> = {},
+): SearchDocument => ({
+	youtubeChannelId: "UC_bonsai",
+	title: "Bonsai Hours",
+	description: "Slow television for small trees.",
+	videoTitles: ["Repotting a juniper", "One cut, huge difference"],
+	meetsEntryBar: true,
+	subscriberCount: 12_000,
+	totalViewCount: 4_000_000,
+	uploadCadencePerWeek: 2,
+	channelAgeDays: 400,
 	...overrides,
 });
 

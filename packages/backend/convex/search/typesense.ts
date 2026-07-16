@@ -15,15 +15,13 @@
  * multi-field sort with missing values at the favourable end — so the suite tests the search
  * production actually runs.
  */
-import { v } from "convex/values";
-import { signalsValidator } from "../discovery/signals";
-import { growthValidator } from "../growth";
-import type {
-	NumericField,
-	SearchDocument,
-	SearchIndex,
-	SearchQuery,
-	SortKey,
+import {
+	NUMERIC_FIELDS,
+	numericValidators,
+	type SearchDocument,
+	type SearchIndex,
+	type SearchQuery,
+	type SortKey,
 } from "./searchIndex";
 
 /** The Typesense collection Channels are projected into. */
@@ -33,24 +31,12 @@ export const CHANNELS_COLLECTION = "channels";
 const QUERY_BY = ["title", "description", "videoTitles"] as const;
 
 /**
- * Every numeric field the collection carries, with the validator that defines each — the raw
- * stats, plus every Signal and Growth Metric. Taken straight from `signalsValidator` and
- * `growthValidator` rather than re-listed, so the collection schema cannot fall out of step
- * with what a Channel is actually projected with, and each field's `optional` in the schema
- * is read from the same validator that decides whether a crawl may leave it absent.
+ * The numeric fields a crawl always sets — the ones the port's validators mark required. The
+ * field list itself is the port's (`numericValidators`), so the collection this adapter
+ * creates holds exactly the fields the rest of the app filters and sorts on.
  */
-const NUMERIC_VALIDATORS = {
-	subscriberCount: v.number(),
-	totalViewCount: v.number(),
-	...signalsValidator.fields,
-	...growthValidator.fields,
-};
-
-const NUMERIC_FIELDS = Object.keys(NUMERIC_VALIDATORS) as NumericField[];
-
-/** The numeric fields a crawl always sets — the ones the validator marks required. */
 const REQUIRED_NUMERIC = new Set(
-	Object.entries(NUMERIC_VALIDATORS)
+	Object.entries(numericValidators)
 		.filter(([, validator]) => validator.isOptional === "required")
 		.map(([name]) => name),
 );

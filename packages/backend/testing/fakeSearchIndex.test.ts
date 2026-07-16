@@ -1,25 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SearchDocument } from "../convex/search/searchIndex";
+import { aSearchDocument as aDocument } from "./channelFixtures";
 import { createFakeSearchIndex } from "./fakeSearchIndex";
-
-/**
- * A projected Channel with sane defaults, so each test states only the fields it is about.
- * Every Channel here clears the Entry Bar unless a test says otherwise.
- */
-const aDocument = (
-	overrides: Partial<SearchDocument> = {},
-): SearchDocument => ({
-	youtubeChannelId: "UC_bonsai",
-	title: "Bonsai Hours",
-	description: "Slow television for small trees.",
-	videoTitles: ["Repotting a juniper", "One cut, huge difference"],
-	meetsEntryBar: true,
-	subscriberCount: 12_000,
-	totalViewCount: 4_000_000,
-	uploadCadencePerWeek: 2,
-	channelAgeDays: 400,
-	...overrides,
-});
 
 const ids = (documents: SearchDocument[]) =>
 	documents.map((document) => document.youtubeChannelId);
@@ -214,11 +196,11 @@ describe("createFakeSearchIndex — sort", () => {
 	it("orders by a single field, ascending", async () => {
 		const { ids } = await search(
 			[
-				aDocument({ youtubeChannelId: "UC_mid", subscriberCount: 20_000 }),
-				aDocument({ youtubeChannelId: "UC_big", subscriberCount: 90_000 }),
-				aDocument({ youtubeChannelId: "UC_small", subscriberCount: 5_000 }),
+				aDocument({ youtubeChannelId: "UC_mid", medianViewsPerVideo: 20_000 }),
+				aDocument({ youtubeChannelId: "UC_big", medianViewsPerVideo: 90_000 }),
+				aDocument({ youtubeChannelId: "UC_small", medianViewsPerVideo: 5_000 }),
 			],
-			{ sort: [{ field: "subscriberCount", direction: "asc" }] },
+			{ sort: [{ field: "medianViewsPerVideo", direction: "asc" }] },
 		);
 		expect(ids).toEqual(["UC_small", "UC_mid", "UC_big"]);
 	});
@@ -229,23 +211,23 @@ describe("createFakeSearchIndex — sort", () => {
 				aDocument({
 					youtubeChannelId: "UC_a",
 					momentum: 2,
-					subscriberCount: 10_000,
+					medianViewsPerVideo: 10_000,
 				}),
 				aDocument({
 					youtubeChannelId: "UC_b",
 					momentum: 2,
-					subscriberCount: 30_000,
+					medianViewsPerVideo: 30_000,
 				}),
 				aDocument({
 					youtubeChannelId: "UC_c",
 					momentum: 5,
-					subscriberCount: 1_000,
+					medianViewsPerVideo: 1_000,
 				}),
 			],
 			{
 				sort: [
 					{ field: "momentum", direction: "desc" },
-					{ field: "subscriberCount", direction: "desc" },
+					{ field: "medianViewsPerVideo", direction: "desc" },
 				],
 			},
 		);
@@ -325,14 +307,14 @@ describe("createFakeSearchIndex — pagination", () => {
 		const documents = Array.from({ length: 5 }, (_, i) =>
 			aDocument({
 				youtubeChannelId: `UC_${i}`,
-				subscriberCount: (i + 1) * 1_000,
+				medianViewsPerVideo: (i + 1) * 1_000,
 			}),
 		);
 		const index = createFakeSearchIndex();
 		await index.upsert(documents);
 
 		const result = await index.query({
-			sort: [{ field: "subscriberCount", direction: "asc" }],
+			sort: [{ field: "medianViewsPerVideo", direction: "asc" }],
 			offset: 1,
 			limit: 2,
 		});

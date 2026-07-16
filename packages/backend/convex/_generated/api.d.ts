@@ -25,6 +25,7 @@ import type * as ingestion from "../ingestion.js";
 import type * as polar from "../polar.js";
 import type * as privateData from "../privateData.js";
 import type * as refresh from "../refresh.js";
+import type * as search_channels from "../search/channels.js";
 import type * as search_rebuild from "../search/rebuild.js";
 import type * as search_searchIndex from "../search/searchIndex.js";
 import type * as search_typesense from "../search/typesense.js";
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   polar: typeof polar;
   privateData: typeof privateData;
   refresh: typeof refresh;
+  "search/channels": typeof search_channels;
   "search/rebuild": typeof search_rebuild;
   "search/searchIndex": typeof search_searchIndex;
   "search/typesense": typeof search_typesense;

@@ -14,8 +14,9 @@
  * two things downstream tickets sort and filter on — numeric ranges and multi-field sorts
  * — or the whole suite would be testing a search that behaves differently in production.
  */
-import type { Signals } from "../discovery/signals";
-import type { Growth } from "../growth";
+import { type Infer, v } from "convex/values";
+import { type Signals, signalsValidator } from "../discovery/signals";
+import { type Growth, growthValidator } from "../growth";
 
 /**
  * A Channel projected into the search engine: flat, self-contained, and keyed on the
@@ -59,23 +60,83 @@ export type SearchDocument = {
 	Growth;
 
 /**
- * Every field a search may filter or sort on: the raw stats plus every numeric key of the
- * Channel's Signals and Growth Metrics. Derived from those types, not re-listed, so a range
- * or a sort key can only reference a field the projection actually carries — a filter on a
- * field the engine does not hold is a bug caught by the compiler, not an empty result set at
- * runtime — and a new Signal becomes filterable without being named twice.
+ * The raw stats a Channel carries. These scope *competition level* — how hard a niche would
+ * be to enter — which is why they are filters and never sorts (see `SortableField`).
+ *
+ * Named once, here: the `RawStatField` type and the runtime list that excludes them from a
+ * sort are both read off this object, so the ban cannot come loose from the type by one of
+ * the two gaining a field the other never heard about.
  */
-export type NumericField =
-	| "subscriberCount"
-	| "totalViewCount"
-	| keyof Signals
-	| keyof Growth;
+const rawStatValidators = {
+	subscriberCount: v.number(),
+	totalViewCount: v.number(),
+};
 
-/** An inclusive numeric range. Either bound may be omitted to leave that side open. */
-export type NumericRange = { min?: number; max?: number };
+export type RawStatField = keyof typeof rawStatValidators;
+
+/**
+ * Every field a search may filter on: the raw stats plus every numeric key of the Channel's
+ * Signals and Growth Metrics. Derived from those types, not re-listed, so a range or a sort
+ * key can only reference a field the projection actually carries — a filter on a field the
+ * engine does not hold is a bug caught by the compiler, not an empty result set at runtime —
+ * and a new Signal becomes filterable without being named twice.
+ */
+export type NumericField = RawStatField | keyof Signals | keyof Growth;
+
+/**
+ * Every field a search may *sort* on: each filterable field except the raw stats.
+ *
+ * Sorting by raw subscriber or view count ranks Channels by how hard they are to compete
+ * with, which is the exact opposite of the question the product exists to answer — so the
+ * ban is expressed in the type rather than left to each caller to remember. A sort on raw
+ * size does not fail a review or a validator; it fails to compile. What remains sortable is
+ * every *normalised* Signal (each compares a Channel to itself or to its own size) and every
+ * Growth Metric, both of which CONTEXT.md holds are sorted directly.
+ */
+export type SortableField = Exclude<NumericField, RawStatField>;
+
+/**
+ * An inclusive numeric range. Either bound may be omitted to leave that side open. Defined as
+ * a validator so the public search API can accept a range over the wire without re-declaring
+ * its shape, and the type below is read back off it — one definition, not two.
+ */
+export const numericRangeValidator = v.object({
+	min: v.optional(v.number()),
+	max: v.optional(v.number()),
+});
+
+export type NumericRange = Infer<typeof numericRangeValidator>;
 
 /** One key of a multi-field sort: a field and the direction to order it in. */
-export type SortKey = { field: NumericField; direction: "asc" | "desc" };
+export type SortKey = { field: SortableField; direction: "asc" | "desc" };
+
+/**
+ * Every numeric field the projection carries, with the validator that defines each. Taken
+ * straight from `signalsValidator` and `growthValidator` rather than re-listed, so the fields
+ * a search filters on cannot fall out of step with what a Channel is actually projected with,
+ * and each field's `optional` is read from the same validator that decides whether a crawl
+ * may leave it absent.
+ *
+ * This is the port's list, not any one engine's: the Typesense collection schema and the
+ * public search API's own validators are both built from it, so an engine cannot hold a field
+ * the API will not accept a filter on, nor the reverse.
+ */
+export const numericValidators = {
+	...rawStatValidators,
+	...signalsValidator.fields,
+	...growthValidator.fields,
+};
+
+export const NUMERIC_FIELDS = Object.keys(numericValidators) as NumericField[];
+
+/**
+ * The sortable fields at runtime — `SortableField` made enumerable, so the public API can
+ * build a validator that rejects a sort on raw size rather than silently running it. Filtered
+ * from the same list the type is derived from, so the two cannot disagree.
+ */
+export const SORTABLE_FIELDS = NUMERIC_FIELDS.filter(
+	(field): field is SortableField => !(field in rawStatValidators),
+);
 
 export type SearchQuery = {
 	/**
@@ -101,6 +162,19 @@ export type SearchQuery = {
 	 * unspecified. An absent value on a sorted field orders as *not the worst* — see
 	 * `compareBySort` in the fake — so an unmeasured Channel never sorts below one the index
 	 * watched decline.
+	 *
+	 * That rule places an absent value at the *high* end of the field, which is the harmless
+	 * end only because of an invariant `signalsValidator` happens to hold: every Signal that
+	 * can be absent (Momentum, Views per Subscriber, Median Views per Video, Outlier Ratio,
+	 * both Form Shares) and every Growth Metric is one where a *higher* number is the more
+	 * interesting Channel, so "high" and "not the worst" coincide. The two Signals where a
+	 * lower number is the better answer — Upload Cadence (least labour) and Channel Age
+	 * (youngest) — are exactly the two the validator marks *required*: a crawl always computes
+	 * them, so they are never absent and never sorted by this rule at all.
+	 *
+	 * Making one of those two optional would break that coincidence: an unmeasured Cadence
+	 * would sort as infinitely demanding — the worst answer to "what labour am I signing up
+	 * for?" — and this rule would need to become per-field rather than per-direction.
 	 */
 	sort?: SortKey[];
 	/** How many documents to return. */

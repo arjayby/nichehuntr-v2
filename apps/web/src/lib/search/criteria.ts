@@ -1,6 +1,6 @@
 /**
- * The Discovery screen's search criteria: what a user may filter on, what they may sort by,
- * and how the boxes they type in become the search the backend runs.
+ * The search screen's criteria: what a user may filter on, what they may sort by, and how the
+ * boxes they type in become the search the backend runs.
  *
  * Pure and free of React on purpose. The screen's rules — a percentage is a ratio, a
  * half-typed number is not a filter, changing anything returns you to page one — are the part
@@ -10,9 +10,22 @@
  * `docs/adr/0002-credits-meter-discovery-not-search.md`). Nothing in this module, and nothing
  * on the screen it drives, spends a Credit: Discovery is the metered act, and it is not here.
  */
+import type {
+	NumericField,
+	SortableField,
+} from "@nichehuntr-v2/backend/convex/search/searchIndex";
 
-/** Every field a user may filter on: the Signals they scope by, plus the two raw stats. */
-export type FilterField =
+/**
+ * Every field a user may filter on: the Signals they scope by, plus the two raw stats.
+ *
+ * Drawn from the projection's own `NumericField` rather than merely spelled like it, so a field
+ * the engine stops holding cannot go on being offered here — it stops compiling instead. The
+ * list is narrower than `NumericField` on purpose: it is the product's filter list, and the
+ * Growth Metrics the engine can filter are not on it, because every one of them is absent until
+ * a Channel has ~30 days of Snapshots and a filter nothing can satisfy is not a filter.
+ */
+export type FilterField = Extract<
+	NumericField,
 	| "subscriberCount"
 	| "totalViewCount"
 	| "momentum"
@@ -20,26 +33,67 @@ export type FilterField =
 	| "shortsUploadShare"
 	| "shortsViewShare"
 	| "uploadCadencePerWeek"
-	| "channelAgeDays";
+	| "channelAgeDays"
+>;
 
 /**
  * Every field a user may sort by — each one a Signal, and not one of them a raw stat.
  *
  * Sorting by subscriber or total-view count ranks Channels by how hard they are to compete
  * with, which is the opposite of the question this product answers, so the ban is in the type:
- * a sort on raw size does not fail a review, it fails to compile. The backend rejects one at
- * the wire too — this is the same rule held a second time, where the user meets it.
+ * it is drawn from `SortableField`, which the backend derives with the raw stats already
+ * excluded. A sort on raw size does not fail a review, it fails to compile — and the backend
+ * rejects one at the wire besides, because that is where an untyped client meets the rule.
+ *
+ * These are exactly the Signals CONTEXT.md enumerates. Two asymmetries against the filter list
+ * above are deliberate: Median Views per Video and Outlier Ratio are sorts but not filters
+ * (nobody thinks in "median views between X and Y" — they want the best ones first), and Shorts
+ * Upload Share is a filter but not a sort (what a Channel *makes* narrows a search; what
+ * *works* for it is the Signal worth ranking by, and that is Shorts View Share).
  */
-export type SortField =
+export type SortField = Extract<
+	SortableField,
 	| "momentum"
 	| "viewsPerSubscriber"
 	| "medianViewsPerVideo"
 	| "outlierRatio"
 	| "uploadCadencePerWeek"
 	| "channelAgeDays"
-	| "shortsViewShare";
+	| "shortsViewShare"
+>;
 
 export type SortDirection = "asc" | "desc";
+
+/**
+ * The one sentence that explains each field, in the user's terms.
+ *
+ * One home, read by both the filter that narrows on a field and the row that prints it. CONTEXT
+ * makes "explainable in one sentence" a property of the Signal itself, not of the control that
+ * happens to show it — and two copies of a sentence are two sentences, which is what these were
+ * becoming.
+ */
+export const FIELD_HELP: Record<FilterField | SortField, string> = {
+	subscriberCount:
+		"How big the Channel is. A filter, never a sort — size says how hard it would be to compete, not whether the niche is open.",
+	totalViewCount:
+		"Views across the Channel's whole life — proven demand, as opposed to noise.",
+	momentum:
+		"Views on its recent Videos against its own lifetime average. Above 1× means it is heating up right now.",
+	viewsPerSubscriber:
+		"Views earned per subscriber. High means the content does the work rather than the audience — the format is cloneable.",
+	medianViewsPerVideo:
+		"What a typical Video does here, immune to a single viral fluke.",
+	outlierRatio:
+		"Its best recent Video against its own typical Video — a specific idea that just printed.",
+	uploadCadencePerWeek:
+		"Videos per week — the labour the niche demands of you. Five a week is a different business from one.",
+	channelAgeDays:
+		"Days since the Channel was created. A young Channel that has broken through proves the niche is enterable now.",
+	shortsUploadShare:
+		"The share of its recent uploads that are Shorts — what the Channel makes.",
+	shortsViewShare:
+		"The share of its recent views that came from Shorts — what actually works for it.",
+};
 
 export type RangeFilter = {
 	field: FilterField;
@@ -69,7 +123,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "subscriberCount",
 		label: "Subscribers",
-		help: "How big the Channel is. A filter, never a sort — size says how hard it would be to compete, not whether the niche is open.",
+		help: FIELD_HELP.subscriberCount,
 		unit: "subscribers",
 		divisor: 1,
 		placeholder: { min: "10000", max: "200000" },
@@ -77,7 +131,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "totalViewCount",
 		label: "Total views",
-		help: "Views across the Channel's whole life — proven demand, as opposed to noise.",
+		help: FIELD_HELP.totalViewCount,
 		unit: "views",
 		divisor: 1,
 		placeholder: { min: "100000", max: "" },
@@ -85,7 +139,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "momentum",
 		label: "Momentum",
-		help: "Views on its recent Videos against its own lifetime average. Above 1 means it is heating up right now.",
+		help: FIELD_HELP.momentum,
 		unit: "×",
 		divisor: 1,
 		placeholder: { min: "2", max: "" },
@@ -93,7 +147,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "viewsPerSubscriber",
 		label: "Views per subscriber",
-		help: "High means the content does the work rather than the audience — the format is cloneable.",
+		help: FIELD_HELP.viewsPerSubscriber,
 		unit: "views/sub",
 		divisor: 1,
 		placeholder: { min: "50", max: "" },
@@ -101,7 +155,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "shortsUploadShare",
 		label: "Shorts upload share",
-		help: "The share of its recent uploads that are Shorts — what the Channel makes.",
+		help: FIELD_HELP.shortsUploadShare,
 		unit: "%",
 		divisor: 100,
 		placeholder: { min: "0", max: "100" },
@@ -109,7 +163,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "shortsViewShare",
 		label: "Shorts view share",
-		help: "The share of its recent views that came from Shorts — what actually works for it.",
+		help: FIELD_HELP.shortsViewShare,
 		unit: "%",
 		divisor: 100,
 		placeholder: { min: "70", max: "100" },
@@ -117,7 +171,7 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "uploadCadencePerWeek",
 		label: "Upload cadence",
-		help: "Videos per week — the labour the niche demands of you. Five a week is a different business from one.",
+		help: FIELD_HELP.uploadCadencePerWeek,
 		unit: "videos/week",
 		divisor: 1,
 		placeholder: { min: "1", max: "5" },
@@ -125,15 +179,22 @@ export const RANGE_FILTERS: readonly RangeFilter[] = [
 	{
 		field: "channelAgeDays",
 		label: "Channel age",
-		help: "Days since the Channel was created. A young Channel that has broken through proves the niche is enterable now.",
+		help: FIELD_HELP.channelAgeDays,
 		unit: "days",
 		divisor: 1,
 		placeholder: { min: "0", max: "365" },
 	},
 ];
 
+/**
+ * A sort, named as one string so it can be the value of a `<select>` — the one place a sort has
+ * to survive as text. Spelled out of the two types it is made of, so a typo is a compile error
+ * rather than a sort that silently does nothing.
+ */
+export type SortOptionId = `${SortField}:${SortDirection}`;
+
 export type SortOption = {
-	id: string;
+	id: SortOptionId;
 	field: SortField;
 	direction: SortDirection;
 	/** What this sort puts at the top, said plainly. Never a bare field name. */
@@ -206,7 +267,7 @@ export type SearchCriteria = {
 	keyword: string;
 	filters: Partial<Record<FilterField, FilterInput>>;
 	/** The id of the chosen `SortOption`. */
-	sortId: string;
+	sortId: SortOptionId;
 	/** 0-based, as the backend counts. */
 	page: number;
 };
@@ -229,8 +290,21 @@ const filterByField = new Map(
 
 const sortById = new Map(SORT_OPTIONS.map((option) => [option.id, option]));
 
-export const sortOptionFor = (sortId: string): SortOption =>
-	sortById.get(sortId) ?? (SORT_OPTIONS[0] as SortOption);
+/**
+ * The sort an id names, or an error.
+ *
+ * Thrown at rather than defaulted to Momentum: the only thing that produces one of these is a
+ * `<select>` we rendered from `SORT_OPTIONS` ourselves, so an id nothing matches is our bug, and
+ * quietly sorting by Momentum instead would hide it behind a list that looks fine. The backend
+ * takes the same line with a page number it cannot honour.
+ */
+export function sortOptionFor(sortId: string): SortOption {
+	const option = sortById.get(sortId as SortOptionId);
+	if (option === undefined) {
+		throw new Error(`No sort is offered for "${sortId}"`);
+	}
+	return option;
+}
 
 /**
  * A typed bound as the number the index holds, or `undefined` if it is not a number yet.
@@ -318,10 +392,11 @@ export const setKeyword = (
 	keyword: string,
 ): SearchCriteria => changed(criteria, { keyword });
 
+/** Takes the `<select>`'s string and validates it into a sort, so an unknown id throws here. */
 export const setSort = (
 	criteria: SearchCriteria,
 	sortId: string,
-): SearchCriteria => changed(criteria, { sortId });
+): SearchCriteria => changed(criteria, { sortId: sortOptionFor(sortId).id });
 
 export function setBound(
 	criteria: SearchCriteria,

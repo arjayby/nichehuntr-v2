@@ -249,10 +249,48 @@ describe("paging through the matches", () => {
 	});
 
 	it("cannot go past the last page", async () => {
-		render(<Harness results={aPage({ found: 40, page: 1, pageSize: 20 })} />);
+		// Two pages of 20 in a match of 40, paged to the end the way a user gets there.
+		render(<Harness results={aPage({ found: 40, page: 0, pageSize: 20 })} />);
 
-		expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+		await userEvent.click(screen.getByRole("button", { name: /next/i }));
+
 		expect(screen.getByText(/page 2 of 2/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+	});
+
+	it("keeps advancing while the results on screen are still catching up", async () => {
+		// The pager pages from what the user asked for, not from what came back. A search is
+		// debounced and the previous page stays on screen while the next loads, so `results.page`
+		// lags `criteria.page` for a moment after every click — and a pager reading the stale
+		// response would compute `page + 1` from the old page and stick, ignoring the second
+		// click. `results` is held fixed here, which is that lag at its worst.
+		const calls: ReturnType<typeof toSearchArgs>[] = [];
+		render(
+			<Harness
+				results={aPage({ found: 137, page: 0 })}
+				onSearch={(args) => calls.push(args)}
+			/>,
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: /next/i }));
+		await userEvent.click(screen.getByRole("button", { name: /next/i }));
+
+		expect(calls.map((call) => call.page)).toEqual([1, 2]);
+	});
+
+	it("counts the page the user asked for, even before its results land", async () => {
+		const calls: ReturnType<typeof toSearchArgs>[] = [];
+		render(
+			<Harness
+				results={aPage({ found: 137, page: 0 })}
+				onSearch={(args) => calls.push(args)}
+			/>,
+		);
+
+		await userEvent.click(screen.getByRole("button", { name: /next/i }));
+
+		expect(screen.getByText(/page 2 of 7/i)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: /previous/i })).toBeEnabled();
 	});
 });
 

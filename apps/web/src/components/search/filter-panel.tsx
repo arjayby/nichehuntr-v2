@@ -21,8 +21,9 @@ import {
  * Shorts, Momentum above 2" — and a bucket list is somebody else's thesis. Each control clears
  * by itself so a user can loosen one constraint without rebuilding the query around it.
  *
- * Nothing here spends a Credit. Search is unlimited and free on every plan; Discovery is the
- * metered act, and it is not on this screen.
+ * Nothing here spends a Credit. Searching the index is unlimited and free on every plan;
+ * Discovery — going out to YouTube for what we have not indexed — is the metered act, and it is
+ * not on this screen.
  */
 function RangeControl({
 	filter,

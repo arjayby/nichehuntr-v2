@@ -15,13 +15,13 @@ const TONE_STYLES: Record<FreshnessTone, string> = {
 	stale: "text-destructive",
 };
 
-const TONE_LABELS: Record<FreshnessTone, string> = {
-	fresh: "Last read",
-	aging: "Last read",
-	// Named, not merely coloured: colour is not a claim a screen reader can read, and "stale"
-	// is the whole point of showing this.
-	stale: "Stale — last read",
-};
+/**
+ * A stale Freshness says so in words, not only in red: colour is not a claim a screen reader
+ * can read, and "this stat is stale" is the whole reason the Freshness is on the row. The other
+ * two tones need no adjective — the age itself is the claim, and the colour is the nuance.
+ */
+const prefixFor = (tone: FreshnessTone) =>
+	tone === "stale" ? "Stale — last read" : "Last read";
 
 export function FreshnessBadge({
 	lastRefreshedAt,
@@ -44,7 +44,7 @@ export function FreshnessBadge({
 				className,
 			)}
 		>
-			<span className="text-muted-foreground">{TONE_LABELS[tone]}</span>
+			<span className="text-muted-foreground">{prefixFor(tone)}</span>
 			<time dateTime={new Date(lastRefreshedAt).toISOString()}>{label}</time>
 		</span>
 	);

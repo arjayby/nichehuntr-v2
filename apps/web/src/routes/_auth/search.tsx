@@ -20,7 +20,7 @@ export const Route = createFileRoute("/_auth/search")({
 const SETTLE_MS = 250;
 
 /**
- * The Discovery route: holds the criteria, runs the search, hands both to the screen.
+ * The search route: holds the criteria, runs the search, hands both to the screen.
  *
  * A `useQuery` over a Convex *action*, not a reactive query — the search engine is reached over
  * HTTP, so results cannot live-update the way a Convex query would (see

@@ -7,50 +7,32 @@
  * is no composite score on a row, deliberately: we have no ground truth about which niches made
  * anyone money, so a blended number could never be justified to the user staking months on it.
  */
-import type { SortField } from "./criteria";
+import { FIELD_HELP, type SortField } from "./criteria";
 
-/** A Signal shown on every row, with the sentence that says what it means. */
+/** A Signal shown on every row, under the short label a column has room for. */
 export type RowSignal = {
 	field: SortField;
 	label: string;
-	help: string;
 };
 
 /**
  * The Signals a row shows, in the order it shows them: Momentum first, because it is the
  * question the product leads with — is this heating up right now.
+ *
+ * Shorts View Share is the one sortable Signal absent here, because a row shows it beside its
+ * Upload Share as a pair of bars instead: printed alone in this list it would be a single
+ * number about a Channel's Form, which is the one thing that must never appear on a row.
+ *
+ * The sentence explaining each is not repeated here — a Signal's one sentence lives in
+ * `FIELD_HELP`, and the row reads it from there.
  */
 export const ROW_SIGNALS: readonly RowSignal[] = [
-	{
-		field: "momentum",
-		label: "Momentum",
-		help: "Views on its recent Videos against its own lifetime average. Above 1× means it is heating up.",
-	},
-	{
-		field: "viewsPerSubscriber",
-		label: "Views/sub",
-		help: "Views earned per subscriber. High means the content does the work, not the audience — the format is cloneable.",
-	},
-	{
-		field: "medianViewsPerVideo",
-		label: "Median views",
-		help: "What a typical Video does here, immune to a single viral fluke.",
-	},
-	{
-		field: "outlierRatio",
-		label: "Outlier",
-		help: "Its best recent Video against its own typical Video — a specific idea that just printed.",
-	},
-	{
-		field: "uploadCadencePerWeek",
-		label: "Cadence",
-		help: "Videos per week: the labour this niche demands of you.",
-	},
-	{
-		field: "channelAgeDays",
-		label: "Age",
-		help: "How long the Channel has existed. Young and already working means the niche is enterable now.",
-	},
+	{ field: "momentum", label: "Momentum" },
+	{ field: "viewsPerSubscriber", label: "Views/sub" },
+	{ field: "medianViewsPerVideo", label: "Median views" },
+	{ field: "outlierRatio", label: "Outlier" },
+	{ field: "uploadCadencePerWeek", label: "Cadence" },
+	{ field: "channelAgeDays", label: "Age" },
 ];
 
 /**
@@ -91,10 +73,6 @@ const FORMATTERS: Record<SortField, (value: number) => string> = {
 	shortsViewShare: (value) => `${Math.trunc(value * 100)}%`,
 };
 
-const helpByField = new Map(
-	ROW_SIGNALS.map((signal) => [signal.field, signal.help]),
-);
-
 export type ShownSignal = {
 	/** What the row prints. */
 	text: string;
@@ -115,12 +93,9 @@ export function formatSignal(
 	field: SortField,
 	value: number | undefined,
 ): ShownSignal {
-	const help = helpByField.get(field) ?? "";
+	const help = FIELD_HELP[field];
 	if (value === undefined) {
-		return {
-			text: "—",
-			title: `Not measured yet. ${help}`.trim(),
-		};
+		return { text: "—", title: `Not measured yet. ${help}` };
 	}
 	return { text: FORMATTERS[field](value), title: help };
 }

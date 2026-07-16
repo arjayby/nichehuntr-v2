@@ -4,6 +4,7 @@ import {
 	activeFilterFields,
 	clearFilter,
 	EMPTY_CRITERIA,
+	FIELD_HELP,
 	RANGE_FILTERS,
 	SORT_OPTIONS,
 	setBound,
@@ -143,6 +144,34 @@ describe("turning criteria into a search", () => {
 		expect(toSearchArgs(criteria).sort).toEqual([
 			{ field: "channelAgeDays", direction: "asc" },
 		]);
+	});
+
+	it("refuses a sort nothing offers rather than quietly sorting by something else", () => {
+		// The only thing that produces a sort id is a <select> built from SORT_OPTIONS, so an id
+		// nothing matches is our bug. Falling back to Momentum would hide it behind a list that
+		// looks perfectly fine — and the user would never know they were not sorted as asked.
+		expect(() => setSort(EMPTY_CRITERIA, "subscriberCount:desc")).toThrow(
+			/no sort is offered/i,
+		);
+	});
+});
+
+describe("the one sentence that explains a field", () => {
+	it("says the same thing wherever a field is shown", () => {
+		// Every filter reads its sentence from the one place that holds it, so the filter panel
+		// and the result row cannot drift into explaining the same Signal two different ways.
+		for (const filter of RANGE_FILTERS) {
+			expect(filter.help).toBe(FIELD_HELP[filter.field]);
+		}
+	});
+
+	it("explains every field a user can filter or sort by", () => {
+		for (const field of [
+			...RANGE_FILTERS.map((filter) => filter.field),
+			...SORT_OPTIONS.map((option) => option.field),
+		]) {
+			expect(FIELD_HELP[field]).toMatch(/\S/);
+		}
 	});
 });
 

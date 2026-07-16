@@ -14,8 +14,14 @@ import { ChannelRow } from "./channel-row";
 import { FilterPanel } from "./filter-panel";
 
 /**
- * The Discovery screen: a keyword box, the filters, a sorted list of Channels, the match count
- * and a pager.
+ * The Channel search screen: a keyword box, the filters, a sorted list of Channels, the match
+ * count and a pager.
+ *
+ * Named for what it does, not for the product area it sits in. The PRD brands this half of the
+ * product "Discovery", but CONTEXT.md gives that word to one specific act — going out to YouTube
+ * for Channels we have not indexed — and that act is metered in Credits while this screen is
+ * free (ADR-0002). Searching the index we already have is not Discovery, so nothing here is
+ * called Discovery.
  *
  * Presentational and complete — it takes the criteria, the page of results and a callback, and
  * knows nothing about how a search is run. The route above it does the fetching. That split is
@@ -24,8 +30,7 @@ import { FilterPanel } from "./filter-panel";
  *
  * Nothing on this screen costs a Credit, and nothing on it should make a user hesitate before
  * searching: exploring the index is the entire activity, and metering it would kill the product
- * to save the Crawl Budget. Discovery — going out to YouTube to find what we have not indexed —
- * is the metered act, and it is not here.
+ * to save the Crawl Budget.
  */
 export type SearchScreenProps = {
 	criteria: SearchCriteria;
@@ -37,10 +42,17 @@ export type SearchScreenProps = {
 	now?: number;
 };
 
-/** "1–20 of 137 Channels" — what the criteria matched, not what this page holds. */
+/**
+ * "1–20 of 137 Channels" — how many Channels the criteria matched, which is the number that says
+ * how crowded a niche is and which one page could never answer.
+ *
+ * Counted off `results`, not off the criteria: this sentence describes the rows actually on
+ * screen, and during a search those are still the previous page's. Labelling stale rows with the
+ * page the user has just asked for would be the one wrong answer here.
+ */
 function MatchCount({ results }: { results: ChannelSearchPage }) {
 	const { found, page, pageSize, channels } = results;
-	if (found === 0) {
+	if (found === 0 || channels.length === 0) {
 		return <span>No Channels match</span>;
 	}
 	const first = page * pageSize + 1;
@@ -59,6 +71,17 @@ function MatchCount({ results }: { results: ChannelSearchPage }) {
 	);
 }
 
+/**
+ * The pager.
+ *
+ * The page it is on is `criteria.page` — what the user asked for — and never `results.page`.
+ * Searches are debounced and the previous page stays on screen while the next loads, so the
+ * results lag the criteria for a moment after every click. A pager that computed `page + 1` off
+ * the lagging response would answer a second click with the same page it just asked for, and
+ * paging quickly would quietly stall.
+ *
+ * How many pages there *are* still comes from `results`: only the search knows what matched.
+ */
 function Pagination({
 	results,
 	criteria,
@@ -68,7 +91,8 @@ function Pagination({
 	criteria: SearchCriteria;
 	onCriteriaChange: (next: SearchCriteria) => void;
 }) {
-	const { found, page, pageSize } = results;
+	const { found, pageSize } = results;
+	const page = criteria.page;
 	const lastPage = Math.max(0, Math.ceil(found / pageSize) - 1);
 
 	return (

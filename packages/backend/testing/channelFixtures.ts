@@ -6,7 +6,8 @@ import type { SourceVideo } from "../convex/discovery/channelSource";
 import type { SearchDocument } from "../convex/search/searchIndex";
 import type { FakeChannel } from "./fakeChannelSource";
 
-export const DAY = 24 * 60 * 60 * 1000;
+export const HOUR = 60 * 60 * 1000;
+export const DAY = 24 * HOUR;
 
 /**
  * The clock the fixtures are dated against. Tests pass it wherever `now` is needed.
@@ -73,6 +74,8 @@ export const aSearchDocument = (
 	description: "Slow television for small trees.",
 	videoTitles: ["Repotting a juniper", "One cut, huge difference"],
 	meetsEntryBar: true,
+	/** Crawled an hour ago: fresh, unless a test is about staleness and says otherwise. */
+	lastRefreshedAt: NOW - HOUR,
 	subscriberCount: 12_000,
 	totalViewCount: 4_000_000,
 	uploadCadencePerWeek: 2,

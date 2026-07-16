@@ -53,6 +53,22 @@ export type SearchDocument = {
 	 */
 	meetsEntryBar: boolean;
 
+	/**
+	 * When we last read this Channel — its Freshness, and the age of every other number on
+	 * this document.
+	 *
+	 * Carried because Refresh is tiered, so Freshness is uneven across the index and is
+	 * therefore always shown to the user. A result row is served from this projection alone, so
+	 * a Freshness left in Convex is one no row could show; it has to travel with the stats it
+	 * qualifies.
+	 *
+	 * Deliberately *not* a `NumericField`: it is neither a filter nor a sort. It is a date we
+	 * display beside a stat to say how much to trust it, not a measure of the Channel — sorting
+	 * by it would rank Channels by our own crawl schedule, which is a fact about us rather than
+	 * about YouTube, and filtering on it would quietly hide Channels rather than caveat them.
+	 */
+	lastRefreshedAt: number;
+
 	// Raw stats: filters that scope the competition level, never sorts.
 	subscriberCount: number;
 	totalViewCount: number;
@@ -224,6 +240,7 @@ export function projectChannel(
 		description: channel.description,
 		videoTitles,
 		meetsEntryBar: channel.meetsEntryBar,
+		lastRefreshedAt: channel.lastRefreshedAt,
 		subscriberCount: channel.subscriberCount,
 		totalViewCount: channel.totalViewCount,
 		momentum: channel.momentum,

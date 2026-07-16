@@ -101,6 +101,22 @@ describe("projecting a Channel on ingest", () => {
 		});
 	});
 
+	it("projects the Channel's Freshness, so a result row can say how old its stats are", async () => {
+		// Freshness is uneven across the index because Refresh is tiered, so every result row
+		// shows it — a stat presented without it is a claim we cannot support. The row is served
+		// from the projection alone, so a Freshness the engine does not hold is one no row can
+		// show, whatever Convex knows.
+		const { t, search } = setup([aChannel()]);
+
+		await t.action(internal.ingestion.ingestChannel, {
+			youtubeChannelId: "UC_bonsai",
+		});
+
+		const [channel] = await t.run((ctx) => ctx.db.query("channels").collect());
+		const { documents } = await search.query({});
+		expect(documents[0]?.lastRefreshedAt).toBe(channel?.lastRefreshedAt);
+	});
+
 	it("does not project a Channel the Entry Bar turned away", async () => {
 		const { t, search } = setup([
 			aChannel({

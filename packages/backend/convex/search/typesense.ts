@@ -62,6 +62,10 @@ export function channelsCollectionSchema(collection = CHANNELS_COLLECTION) {
 			{ name: "description", type: "string" },
 			{ name: "videoTitles", type: "string[]" },
 			{ name: "meetsEntryBar", type: "bool" },
+			// Freshness: carried so a result row can show it, and declared apart from the
+			// numeric fields below because it is neither filtered nor sorted on — an epoch
+			// millisecond, held as an int64 rather than the float the Signals use.
+			{ name: "lastRefreshedAt", type: "int64" },
 			...NUMERIC_FIELDS.map((field) => ({
 				name: field,
 				type: "float",

@@ -155,7 +155,7 @@
 			"source": "arjayby/skills",
 			"sourceType": "github",
 			"skillPath": "skills/engineering/ship-frontier/SKILL.md",
-			"computedHash": "a4fb4277b868ea5e9b6f3ed7ccd24b1d5ba0925538c1ee6486d22b75e97138f8"
+			"computedHash": "b29d2d5302ec403c316dec0d4db5c5dd8339160c4f82b7fe75c0eb93de644efe"
 		},
 		"tdd": {
 			"source": "mattpocock/skills",

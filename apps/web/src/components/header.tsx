@@ -7,6 +7,9 @@ export default function Header() {
 		// we have not indexed (see ADR-0002). Searching the index we already have is free, and a
 		// label that called it Discovery would price it in the user's head.
 		{ to: "/search", label: "Search" },
+		// A Niche is a named, saved set of search criteria. It sits beside Search because saving
+		// the current criteria and re-running a saved set are two ends of the same act.
+		{ to: "/niches", label: "Niches" },
 		{ to: "/dashboard", label: "Dashboard" },
 	] as const;
 

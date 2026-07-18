@@ -24,6 +24,8 @@ import type * as growth from "../growth.js";
 import type * as healthCheck from "../healthCheck.js";
 import type * as http from "../http.js";
 import type * as ingestion from "../ingestion.js";
+import type * as niches_criteria from "../niches/criteria.js";
+import type * as niches_manage from "../niches/manage.js";
 import type * as polar from "../polar.js";
 import type * as privateData from "../privateData.js";
 import type * as refresh from "../refresh.js";
@@ -55,6 +57,8 @@ declare const fullApi: ApiFromModules<{
   healthCheck: typeof healthCheck;
   http: typeof http;
   ingestion: typeof ingestion;
+  "niches/criteria": typeof niches_criteria;
+  "niches/manage": typeof niches_manage;
   polar: typeof polar;
   privateData: typeof privateData;
   refresh: typeof refresh;

@@ -1,6 +1,7 @@
 import type { ChannelSearchPage } from "@nichehuntr-v2/backend/convex/search/channels";
 import { Button } from "@nichehuntr-v2/ui/components/button";
 import { Input } from "@nichehuntr-v2/ui/components/input";
+import type { ReactNode } from "react";
 
 import {
 	goToPage,
@@ -40,6 +41,13 @@ export type SearchScreenProps = {
 	error?: Error | null;
 	/** The clock, for Freshness. Tests pass one; the app lets it default to now. */
 	now?: number;
+	/**
+	 * Actions that belong to *this* search — saving it as a Niche, saving changes back to the one
+	 * it came from. A slot rather than a fixed control, so the screen stays presentational and does
+	 * not learn what a Niche is: the route that knows drops the control in, and a plain search
+	 * passes nothing.
+	 */
+	headerActions?: ReactNode;
 };
 
 /**
@@ -129,6 +137,7 @@ export function SearchScreen({
 	isSearching,
 	error,
 	now,
+	headerActions,
 }: SearchScreenProps) {
 	return (
 		<div className="grid grid-cols-1 overflow-y-auto md:grid-cols-[20rem_1fr]">
@@ -136,6 +145,11 @@ export function SearchScreen({
 
 			<main className="flex min-w-0 flex-col">
 				<div className="flex flex-col gap-3 border-foreground/10 border-b p-4">
+					{headerActions ? (
+						<div className="flex flex-wrap items-center justify-end gap-2">
+							{headerActions}
+						</div>
+					) : null}
 					<div>
 						<label className="sr-only" htmlFor="keyword">
 							Search Channels by keyword

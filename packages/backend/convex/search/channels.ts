@@ -16,15 +16,13 @@
  * not search — `docs/adr/0002-credits-meter-discovery-not-search.md`), so nothing here spends
  * a Credit or takes a Crawl Budget.
  */
-import { type VLiteral, type VOptional, v } from "convex/values";
+import { v } from "convex/values";
 import { action } from "../_generated/server";
 import {
 	getSearchIndex,
-	NUMERIC_FIELDS,
-	numericRangeValidator,
+	rangeFiltersValidator,
 	type SearchDocument,
-	SORTABLE_FIELDS,
-	type SortableField,
+	sortKeyValidator,
 } from "./searchIndex";
 
 /**
@@ -34,44 +32,6 @@ import {
  */
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
-
-/**
- * An optional range filter per numeric field, built from the port's own field list and its own
- * range validator rather than typed out again — so a new Signal becomes filterable by being a
- * Signal, and a filter can never name a field the engine does not hold.
- *
- * Raw subscriber and total-view counts *are* here: scoping competition level is exactly what
- * they are for. They are absent only from the sort below.
- */
-const filtersValidator = v.object(
-	Object.fromEntries(
-		NUMERIC_FIELDS.map((field) => [field, v.optional(numericRangeValidator)]),
-	) as Record<
-		(typeof NUMERIC_FIELDS)[number],
-		VOptional<typeof numericRangeValidator>
-	>,
-);
-
-/**
- * The fields a search may sort by: every Signal and Growth Metric, and *not* the raw stats.
- *
- * Derived from `SORTABLE_FIELDS`, which is `SortableField` made enumerable, so this validator
- * offers precisely what the type permits. The type already stops our own code sorting by raw
- * size at compile time; this is what stops a hand-rolled client doing it at runtime — the
- * ban has to hold at the wire, because that is where an untyped caller meets it.
- */
-const sortFieldValidator = v.union(
-	...(SORTABLE_FIELDS.map((field) => v.literal(field)) as [
-		VLiteral<SortableField>,
-		VLiteral<SortableField>,
-		...VLiteral<SortableField>[],
-	]),
-);
-
-const sortKeyValidator = v.object({
-	field: sortFieldValidator,
-	direction: v.union(v.literal("asc"), v.literal("desc")),
-});
 
 /**
  * A page of matching Channels, and how many matched the criteria in total.
@@ -91,7 +51,7 @@ export const searchChannels = action({
 	args: {
 		/** Matches the Channel's title, description, and its Videos' titles. */
 		keyword: v.optional(v.string()),
-		filters: v.optional(filtersValidator),
+		filters: v.optional(rangeFiltersValidator),
 		/** Most significant key first; later keys break ties. */
 		sort: v.optional(v.array(sortKeyValidator)),
 		/** 0-based. */

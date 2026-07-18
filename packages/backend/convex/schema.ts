@@ -8,6 +8,7 @@ import { channelStatsValidator } from "./discovery/channelStats";
 import { formValidator } from "./discovery/form";
 import { signalsValidator } from "./discovery/signals";
 import { growthValidator } from "./growth";
+import { nicheCriteriaValidator } from "./niches/criteria";
 
 export default defineSchema({
 	/**
@@ -152,4 +153,44 @@ export default defineSchema({
 		 * `RECENT_VIDEO_LIMIT` off this index reads only what it returns.
 		 */
 		.index("by_channel_published_at", ["channelId", "publishedAt"]),
+
+	/**
+	 * A named, saved set of search criteria — a user's Niche. It stores the *query* (a keyword,
+	 * numeric filters and a sort), never the Channels the query matched: re-running a Niche asks
+	 * the engine again, so it is a living view of the index and not a frozen snapshot of it
+	 * (CONTEXT.md, "Niche").
+	 *
+	 * Per-user and private. `owner` is the caller's stable identity (`tokenIdentifier`), derived
+	 * server-side and never taken as an argument, and every read and write scopes to it — one
+	 * user can neither see nor touch another's Niches.
+	 */
+	niches: defineTable({
+		/** The Better Auth identity that owns this Niche — its `tokenIdentifier`. */
+		owner: v.string(),
+		/** What the user called this set. Non-empty; the mutation trims and rejects a blank. */
+		name: v.string(),
+		/**
+		 * The set-defining query itself, held as one nested value rather than spread flat, so the
+		 * read that hands it to the client is `niche.criteria` and not a field-by-field rebuild —
+		 * a new field on `nicheCriteriaValidator` reaches the client for free instead of being
+		 * silently dropped by a mapping nobody remembered to update.
+		 */
+		criteria: nicheCriteriaValidator,
+	})
+		/** One user's Niches, for the list screen — newest first via `.order("desc")`. */
+		.index("by_owner", ["owner"]),
+
+	/**
+	 * A record that a user has been given their starter Niches — the once-only gift, made a fact
+	 * so it is not repeated.
+	 *
+	 * Without this, "seed starters when the user has none" would hand a fresh set back to anyone
+	 * who deliberately deleted all of theirs, resurrecting a choice they made on purpose. The
+	 * grant records the gift itself, so an empty Niche list means "cleared the slate", not "new
+	 * user" — two states that must not be confused.
+	 */
+	nicheStarterGrants: defineTable({
+		/** The owner who has already received starters — at most one row per identity. */
+		owner: v.string(),
+	}).index("by_owner", ["owner"]),
 });

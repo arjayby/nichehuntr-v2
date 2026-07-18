@@ -14,7 +14,7 @@
  * two things downstream tickets sort and filter on — numeric ranges and multi-field sorts
  * — or the whole suite would be testing a search that behaves differently in production.
  */
-import { type Infer, v } from "convex/values";
+import { type Infer, type VLiteral, type VOptional, v } from "convex/values";
 import { type Signals, signalsValidator } from "../discovery/signals";
 import { type Growth, growthValidator } from "../growth";
 
@@ -153,6 +153,46 @@ export const NUMERIC_FIELDS = Object.keys(numericValidators) as NumericField[];
 export const SORTABLE_FIELDS = NUMERIC_FIELDS.filter(
 	(field): field is SortableField => !(field in rawStatValidators),
 );
+
+/**
+ * An optional range per numeric field, built from the port's own field list and its own range
+ * validator rather than typed out again — so a field the engine stops holding cannot go on
+ * being filtered, it stops compiling. This is the wire shape of a set of filters: what the
+ * public search API accepts and what a saved Niche stores, one definition serving both so a
+ * filter a Niche can hold is exactly a filter a search can run.
+ *
+ * Raw subscriber and total-view counts *are* here — scoping competition level is what they are
+ * for. They are absent only from the sort below.
+ */
+export const rangeFiltersValidator = v.object(
+	Object.fromEntries(
+		NUMERIC_FIELDS.map((field) => [field, v.optional(numericRangeValidator)]),
+	) as Record<
+		(typeof NUMERIC_FIELDS)[number],
+		VOptional<typeof numericRangeValidator>
+	>,
+);
+
+/**
+ * The fields a search or a Niche may sort by: every Signal and Growth Metric, and *not* the raw
+ * stats. Derived from `SORTABLE_FIELDS`, so the validator offers precisely what `SortableField`
+ * permits. The type already stops our own code sorting by raw size at compile time; this is what
+ * stops a hand-rolled client — or a doctored Niche — doing it at the wire, where an untyped
+ * caller meets the rule.
+ */
+export const sortFieldValidator = v.union(
+	...(SORTABLE_FIELDS.map((field) => v.literal(field)) as [
+		VLiteral<SortableField>,
+		VLiteral<SortableField>,
+		...VLiteral<SortableField>[],
+	]),
+);
+
+/** One key of a sort at the wire: a sortable field and the direction to order it in. */
+export const sortKeyValidator = v.object({
+	field: sortFieldValidator,
+	direction: v.union(v.literal("asc"), v.literal("desc")),
+});
 
 export type SearchQuery = {
 	/**

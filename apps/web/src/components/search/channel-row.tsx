@@ -1,9 +1,10 @@
 import type { SearchDocument } from "@nichehuntr-v2/backend/convex/search/searchIndex";
 
-import { formatCount, formatSignal, ROW_SIGNALS } from "@/lib/search/stats";
+import { formatCount } from "@/lib/search/stats";
 
 import { FormShareBars } from "./form-share";
 import { FreshnessBadge } from "./freshness-badge";
+import { SignalGrid } from "./signal-grid";
 
 /**
  * One Channel in the results.
@@ -27,10 +28,13 @@ export function ChannelRow({
 			<div className="flex items-start justify-between gap-4">
 				<div className="min-w-0">
 					<h3 className="truncate font-medium text-sm">
+						{/* Into the Channel, not out to YouTube: a row is the door to the case for
+						    cloning a Channel — all its Signals, its recent Videos and its outliers —
+						    and the link out to YouTube lives on that detail, one step in. A plain
+						    anchor rather than a router Link so the row stays testable with no router
+						    around it, the way every other thing it renders is. */}
 						<a
-							href={`https://www.youtube.com/channel/${channel.youtubeChannelId}`}
-							target="_blank"
-							rel="noreferrer"
+							href={`/channels/${channel.youtubeChannelId}`}
 							className="hover:underline"
 						>
 							{channel.title}
@@ -54,28 +58,7 @@ export function ChannelRow({
 				total views
 			</p>
 
-			<ul
-				aria-label="Signals"
-				className="grid grid-cols-3 gap-2 sm:grid-cols-6"
-			>
-				{ROW_SIGNALS.map((signal) => {
-					const shown = formatSignal(signal.field, channel[signal.field]);
-					return (
-						<li
-							key={signal.field}
-							className="flex flex-col"
-							title={shown.title}
-						>
-							<span className="text-[0.7rem] text-muted-foreground">
-								{signal.label}
-							</span>
-							<span className="font-medium text-xs tabular-nums">
-								{shown.text}
-							</span>
-						</li>
-					);
-				})}
-			</ul>
+			<SignalGrid signals={channel} className="gap-2" />
 
 			<FormShareBars
 				shortsUploadShare={channel.shortsUploadShare}

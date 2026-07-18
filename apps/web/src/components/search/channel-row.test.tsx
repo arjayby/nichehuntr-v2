@@ -18,6 +18,17 @@ describe("what a row says about a Channel", () => {
 		).toBeInTheDocument();
 	});
 
+	it("opens the Channel's detail, where the case for cloning it is made", () => {
+		// The row is the door into the Channel — its Signals, its Videos, its outliers — not a
+		// shortcut out to YouTube. That link out lives on the detail, one step in.
+		renderRow();
+
+		expect(screen.getByRole("link", { name: "Bonsai Hours" })).toHaveAttribute(
+			"href",
+			"/channels/UC_bonsai",
+		);
+	});
+
 	it("shows the raw stats that say how hard it would be to compete", () => {
 		renderRow();
 

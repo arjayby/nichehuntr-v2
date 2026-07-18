@@ -44,17 +44,19 @@ export const projectionBatch = internalQuery({
 
 		const documents: SearchDocument[] = [];
 		for (const channel of page.page) {
-			const videos = await ctx.db
-				.query("videos")
-				.withIndex("by_channel", (q) => q.eq("channelId", channel._id))
-				.collect();
 			// The most recent Videos, newest first, capped at the crawl's own limit — the same
-			// set a crawl would have projected, so a rebuilt document matches the incremental
-			// one rather than carrying every Video the Channel ever had.
-			const recentTitles = videos
-				.sort((a, b) => b.publishedAt - a.publishedAt)
-				.slice(0, RECENT_VIDEO_LIMIT)
-				.map((video) => video.title);
+			// set a crawl would have projected, so a rebuilt document matches the incremental one
+			// rather than carrying every Video the Channel ever had. Bounded by the index rather
+			// than collected whole and sliced: a Channel keeps a Video row per upload forever, so
+			// a full collect grows without limit as the index ages.
+			const recentVideos = await ctx.db
+				.query("videos")
+				.withIndex("by_channel_published_at", (q) =>
+					q.eq("channelId", channel._id),
+				)
+				.order("desc")
+				.take(RECENT_VIDEO_LIMIT);
+			const recentTitles = recentVideos.map((video) => video.title);
 			documents.push(projectChannel(channel, recentTitles));
 		}
 

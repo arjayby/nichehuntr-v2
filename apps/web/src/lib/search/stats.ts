@@ -9,24 +9,26 @@
  */
 import { FIELD_HELP, type SortField } from "./criteria";
 
-/** A Signal shown on every row, under the short label a column has room for. */
-export type RowSignal = {
+/** A Signal shown as a column, under the short label a narrow column has room for. */
+export type SignalColumn = {
 	field: SortField;
 	label: string;
 };
 
 /**
- * The Signals a row shows, in the order it shows them: Momentum first, because it is the
- * question the product leads with — is this heating up right now.
+ * The Signals shown together, in order: Momentum first, because it is the question the product
+ * leads with — is this heating up right now. A search result row and a Channel's detail both
+ * show exactly this set, so the sort a row is ranked by is checkable by eye against the same
+ * numbers the detail lays out in full.
  *
- * Shorts View Share is the one sortable Signal absent here, because a row shows it beside its
- * Upload Share as a pair of bars instead: printed alone in this list it would be a single
- * number about a Channel's Form, which is the one thing that must never appear on a row.
+ * Shorts View Share is the one sortable Signal absent here, because both surfaces show it beside
+ * its Upload Share as a pair of bars instead: printed alone in this list it would be a single
+ * number about a Channel's Form, which is the one thing that must never appear as a lone verdict.
  *
  * The sentence explaining each is not repeated here — a Signal's one sentence lives in
- * `FIELD_HELP`, and the row reads it from there.
+ * `FIELD_HELP`, and the grid reads it from there.
  */
-export const ROW_SIGNALS: readonly RowSignal[] = [
+export const CHANNEL_SIGNALS: readonly SignalColumn[] = [
 	{ field: "momentum", label: "Momentum" },
 	{ field: "viewsPerSubscriber", label: "Views/sub" },
 	{ field: "medianViewsPerVideo", label: "Median views" },

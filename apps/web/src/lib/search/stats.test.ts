@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCount, formatSignal, ROW_SIGNALS } from "./stats";
+import { CHANNEL_SIGNALS, formatCount, formatSignal } from "./stats";
 
 describe("counting things a Channel has", () => {
 	it("keeps a small number exact", () => {
@@ -32,7 +32,7 @@ describe("showing a Signal on a row", () => {
 	});
 
 	it("explains every Signal it shows in one sentence", () => {
-		for (const signal of ROW_SIGNALS) {
+		for (const signal of CHANNEL_SIGNALS) {
 			expect(formatSignal(signal.field, 1).title).toMatch(/\S/);
 		}
 	});

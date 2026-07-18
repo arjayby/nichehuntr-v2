@@ -143,5 +143,13 @@ export default defineSchema({
 		form: formValidator,
 	})
 		.index("by_youtube_video_id", ["youtubeVideoId"])
-		.index("by_channel", ["channelId"]),
+		/**
+		 * A Channel's Videos, newest last — read newest-first with `.order("desc")`. Keyed on
+		 * `publishedAt` as well as the Channel so the recent Videos everything downstream wants
+		 * (a rebuild's projection, a detail view's list) come back already ordered and, crucially,
+		 * *bounded*: a Channel accumulates a Video row per upload across every Refresh and none are
+		 * deleted, so a plain `by_channel` read grows without limit. Taking the most recent
+		 * `RECENT_VIDEO_LIMIT` off this index reads only what it returns.
+		 */
+		.index("by_channel_published_at", ["channelId", "publishedAt"]),
 });

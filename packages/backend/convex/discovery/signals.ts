@@ -70,10 +70,14 @@ export type SignalVideo = {
 };
 
 /**
- * Divides, or gives up. Guards every Signal whose denominator can be zero: a Channel
+ * Divides, or gives up. Guards every ratio whose denominator can be zero: a Channel
  * with no subscribers, no Videos, or no views has no ratio — not a ratio of zero.
+ *
+ * Exported because the "no ratio from a zero denominator" rule is not the Signals' alone:
+ * marking a Video against a Channel's median (`discovery/outliers.ts`) is the same division
+ * and the same give-up, and the two must not disagree on what an absent ratio means.
  */
-function divideOrUndefined(
+export function divideOrUndefined(
 	numerator: number,
 	denominator: number,
 ): number | undefined {

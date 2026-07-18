@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as channels_detail from "../channels/detail.js";
 import type * as crawl_budget from "../crawl/budget.js";
 import type * as crawl_priority from "../crawl/priority.js";
 import type * as crons from "../crons.js";
@@ -16,6 +17,7 @@ import type * as discovery_channelSource from "../discovery/channelSource.js";
 import type * as discovery_channelStats from "../discovery/channelStats.js";
 import type * as discovery_entryBar from "../discovery/entryBar.js";
 import type * as discovery_form from "../discovery/form.js";
+import type * as discovery_outliers from "../discovery/outliers.js";
 import type * as discovery_recentWindow from "../discovery/recentWindow.js";
 import type * as discovery_signals from "../discovery/signals.js";
 import type * as growth from "../growth.js";
@@ -38,6 +40,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  "channels/detail": typeof channels_detail;
   "crawl/budget": typeof crawl_budget;
   "crawl/priority": typeof crawl_priority;
   crons: typeof crons;
@@ -45,6 +48,7 @@ declare const fullApi: ApiFromModules<{
   "discovery/channelStats": typeof discovery_channelStats;
   "discovery/entryBar": typeof discovery_entryBar;
   "discovery/form": typeof discovery_form;
+  "discovery/outliers": typeof discovery_outliers;
   "discovery/recentWindow": typeof discovery_recentWindow;
   "discovery/signals": typeof discovery_signals;
   growth: typeof growth;
